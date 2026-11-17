@@ -3,11 +3,9 @@
 import asyncio
 from dataclasses import dataclass
 
-from identity.application.login.command import (
-    VerifyLoginCredentials,
-)
 from identity.application.shared.ports import PasswordHasher
 from identity.domain.aggregates.user import User
+from identity.domain.records import AccountCredentials
 from identity.domain.value_objects.credential_version import CredentialVersion
 from identity.domain.value_objects.user_name import UserName
 
@@ -19,37 +17,32 @@ class LoginCredentialsCheck:
     accepted: bool
 
 
-class VerifyLoginCredentialsHandler:
+async def verify_login_credentials(
+    passwords: PasswordHasher,
+    dummy_password_hash: str,
+    user_name: str,
+    password: str,
+    account: AccountCredentials | None,
+) -> LoginCredentialsCheck:
     """Normalize the submitted user and perform timing-safe credential verification."""
-
-    def __init__(self, passwords: PasswordHasher, dummy_password_hash: str) -> None:
-        self.passwords = passwords
-        self.dummy_password_hash = dummy_password_hash
-
-    @staticmethod
-    def normalize_user_name(user_name: str) -> str:
-        return UserName.parse(user_name).value
-
-    async def execute(self, command: VerifyLoginCredentials) -> LoginCredentialsCheck:
-        normalized = UserName.parse(command.user_name).value
-        account = command.account
-        encoded = account.password_hash if account is not None else self.dummy_password_hash
-        matches = await asyncio.to_thread(self.passwords.verify, command.password, encoded)
-        identity_account = (
-            User(
-                id=account.user_id,
-                user_name=UserName.parse(account.user_name),
-                credential_version=CredentialVersion(account.credential_version),
-                active=account.active,
-            )
-            if account is not None
-            else None
+    normalized = UserName.parse(user_name).value
+    encoded = account.password_hash if account is not None else dummy_password_hash
+    matches = await asyncio.to_thread(passwords.verify, password, encoded)
+    identity_account = (
+        User(
+            id=account.user_id,
+            user_name=UserName.parse(account.user_name),
+            credential_version=CredentialVersion(account.credential_version),
+            active=account.active,
         )
-        return LoginCredentialsCheck(
-            normalized,
-            identity_account.login_fence() if identity_account is not None else None,
-            bool(
-                identity_account is not None
-                and identity_account.accepts_credentials(password_matches=matches)
-            ),
-        )
+        if account is not None
+        else None
+    )
+    return LoginCredentialsCheck(
+        normalized,
+        identity_account.login_fence() if identity_account is not None else None,
+        bool(
+            identity_account is not None
+            and identity_account.accepts_credentials(password_matches=matches)
+        ),
+    )

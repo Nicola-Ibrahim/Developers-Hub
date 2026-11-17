@@ -1,23 +1,58 @@
 ---
 name: api-development
-description: Implement or review DevOps Hub FastAPI routes, schemas, authentication, DI wiring and HTTP tests. Use for API-facing work; combine with backend-development when application or domain behavior changes.
+description: Change or verify a Developers-Hub FastAPI endpoint, including its request schema, permissions and compatibility.
 ---
 
-# FastAPI development
+# FastAPI contract change
 
-Follow [backend architecture](../../../backend/AGENTS.md).
+Use when HTTP behavior changes or when auditing
+API-to-use-case wiring.
 
-1. Trace the capability route through its schema, permission dependency, injected
-   context module and DI binding; record current callers and contract behavior.
-2. Define typed input/output, authentication, authorization, status codes, stable
-   errors and retry/idempotency behavior. Resolve application contracts first.
-3. Authenticate and check project/role permissions in API dependencies. Send a
-   command or query through the context module; translate returned data and typed
-   failures to HTTP without putting status codes in the application.
-   Implement domain or persistence changes through
-   [backend-development](../backend-development/SKILL.md).
-4. Test successful, invalid, denied and retry paths. Update API/developer docs when
-   a public contract or command changes.
+## Procedure
 
-Use the backend skill's focused checks. Distinguish HTTP/schema evidence from real
-provider acceptance and report both accurately.
+1. Identify:
+   - HTTP method and path
+   - Request/response schemas
+   - Authentication source
+   - Permission decision
+   - Expected status codes and errors
+
+2. Trace the route through the context module to the
+   owning application use case.
+
+3. Keep domain mutations and direct ORM operations
+   out of API routes.
+
+4. Clarify:
+   - Authorization
+   - Idempotency
+   - API compatibility
+   - Error mapping
+   - Sensitive credential disclosure
+
+5. Change only the required routes, schemas,
+   module wiring and dependent callers.
+
+6. Avoid duplicating checks without a clear
+   security or ownership reason.
+
+7. Test:
+   - Successful request
+   - Invalid input
+   - Denied access
+   - Relevant failure path
+   - Retry behavior when applicable
+
+8. Compare API/OpenAPI contracts where compatibility
+   with existing clients matters.
+
+## Handoff
+
+Report:
+- HTTP behavior changed
+- Compatibility preserved
+- Authentication/authorization impact
+- Tests performed and remaining gaps
+
+If domain meaning changes, return the decision
+to the coordinator before implementation.

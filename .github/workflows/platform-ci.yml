@@ -146,16 +146,16 @@ jobs:
           ANSIBLE_CONFIG="$GITHUB_WORKSPACE/ops/local/ansible/ansible.cfg" ansible-playbook -i ops/local/ansible/inventory/local.yml ops/local/ansible/playbooks/bootstrap-local.yml --syntax-check
           ansible-playbook -i ops/hosting/ansible/inventory/staging.yml ops/hosting/ansible/playbooks/setup.yml --syntax-check
       - name: Validate local Compose model
-        run: docker compose --profile app --profile resources --profile application-delivery config --quiet
+        run: docker compose config --quiet
       - name: Check developer and hosting scripts without live resources
         run: |
-          bash -n scripts/dev.sh ops/hosting/scripts/*.sh
+          bash -n scripts/dev.sh scripts/db.sh scripts/shell/*.sh ops/hosting/scripts/*.sh
           sh -n backend/docker-entrypoint.sh
           python -m unittest discover -s scripts/tests -v
       - name: Validate Identity authorization policies
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE/backend/src/identity/infra/authorization/policies:/policies:ro" openpolicyagent/opa:1.0.1 check --strict /policies
-          docker run --rm -v "$GITHUB_WORKSPACE/backend/src/identity/infra/authorization/policies:/policies:ro" openpolicyagent/opa:1.0.1 test /policies
+          docker run --rm -v "$GITHUB_WORKSPACE/backend/src/identity/infra/authorization/policies:/policies:ro" openpolicyagent/opa:1.0.1-static check --strict /policies
+          docker run --rm -v "$GITHUB_WORKSPACE/backend/src/identity/infra/authorization/policies:/policies:ro" openpolicyagent/opa:1.0.1-static test /policies
 
   packaged-images:
     if: github.ref != 'refs/heads/main' || vars.AWS_PUBLISH_ROLE_ARN == ''

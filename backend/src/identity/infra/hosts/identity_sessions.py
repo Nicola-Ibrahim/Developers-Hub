@@ -14,8 +14,7 @@ from identity.application.authenticate_session.handler import AuthenticateSessio
 from identity.application.authenticate_session.query import AuthenticateSessionQuery
 from identity.application.bootstrap_first_admin.command import BootstrapFirstAdminCommand
 from identity.application.bootstrap_first_admin.handler import BootstrapFirstAdminHandler
-from identity.application.change_password.command import VerifyPasswordChange
-from identity.application.change_password.handler import VerifyPasswordChangeHandler
+from identity.application.change_password.handler import verify_password_change
 from identity.application.complete_password_setup.command import CompletePasswordSetupCommand
 from identity.application.complete_password_setup.handler import CompletePasswordSetupHandler
 from identity.application.create_user.command import CreateUserCommand
@@ -25,10 +24,7 @@ from identity.application.list_project_members.query import ListProjectMembersBy
 from identity.application.list_sessions.handler import ListSessionsHandler
 from identity.application.list_sessions.query import ListSessionsQuery
 from identity.application.list_sessions.result import SessionDetails
-from identity.application.login.command import (
-    VerifyLoginCredentials,
-)
-from identity.application.login.handler import VerifyLoginCredentialsHandler
+from identity.application.login.handler import verify_login_credentials
 from identity.application.login.result import LoginResult
 from identity.application.logout.command import LogoutCommand
 from identity.application.logout.handler import LogoutHandler
@@ -59,6 +55,7 @@ from identity.application.start_password_setup.command import StartPasswordSetup
 from identity.application.start_password_setup.handler import StartPasswordSetupHandler
 from identity.domain.browser_errors import BrowserAuthenticationRejected
 from identity.domain.records import ProjectMemberDetails, SessionPrincipal
+from identity.domain.value_objects.user_name import UserName
 from identity.infra.persistence.identity_repository import SQLAlchemyIdentityRepository
 from identity.infra.security.passwords import (
     OpaqueSecretGenerator,
@@ -137,10 +134,11 @@ class BrowserIdentityService:
         self, user_name: str, password: str, project_id: UUID | None, origin: str | None
     ) -> LoginResult:
         self._check_origin(origin)
-        login = VerifyLoginCredentialsHandler(self._passwords, self._dummy_password_hash)
-        name = login.normalize_user_name(user_name)
+        name = UserName.parse(user_name).value
         account = await self._run(lambda repo: repo.find_login_account(name), lambda result: result)
-        check = await login.execute(VerifyLoginCredentials(name, password, account))
+        check = await verify_login_credentials(
+            self._passwords, self._dummy_password_hash, name, password, account
+        )
         name = check.normalized_user_name
         token, csrf, now = self._tokens.generate(), self._tokens.generate(), self.clock()
         result = await self._run(
@@ -265,8 +263,8 @@ class BrowserIdentityService:
         account = await self._run(
             lambda repo: repo.find_login_account(principal.user_name), lambda result: result
         )
-        password_change = await VerifyPasswordChangeHandler(self._passwords).execute(
-            VerifyPasswordChange(account, current_password, new_password)
+        password_change = await verify_password_change(
+            self._passwords, account, current_password, new_password
         )
 
         async def action(repo: SQLAlchemyIdentityRepository) -> None:

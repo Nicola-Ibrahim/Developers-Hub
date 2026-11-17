@@ -1,21 +1,68 @@
 ---
 name: delivery-engineering
-description: Implement or review DevOps Hub Docker, Compose, CI/CD, Ansible and Terraform delivery. Use for build, publish, deploy, readiness, rollback or hosting work; platform resource lifecycle uses backend-development.
+description: Change or verify a Developers-Hub CI pipeline, Docker runtime, infrastructure plan, or deployment/rollback workflow.
 ---
 
-# Delivery engineering
+# Delivery and infrastructure workflow
 
-Follow [operations guidance](../../../ops/AGENTS.md).
+Use when changing operational automation or validating
+a deployment path.
 
-1. Trace source revision to immutable artifact, target, credentials, readiness,
-   rollback and state ownership across the affected delivery files.
-2. Define the failure and recovery contract before changing a stage. Preserve the
-   responsibility boundaries in `ops/AGENTS.md`.
-3. Implement one coherent stage with configurable environment values and no
-   secrets in source, logs or generated artifacts.
-4. Verify each stage independently: syntax, build, Compose health, Ansible
-   convergence, Terraform plan, deployment readiness and rollback. Claim only the
-   stages actually exercised.
+## Procedure
 
-Inspect exact targets before any live action. Code changes alone do not authorize
-provisioning, migration, deployment, secret changes or destructive teardown.
+1. Identify what the task actually concerns:
+   - Direct Python execution
+   - Docker/container runtime
+   - CI validation
+   - Artifact publishing
+   - Infrastructure provisioning
+   - Application deployment
+
+2. Do not treat these operations as interchangeable.
+
+3. Follow the execution mode requested by the user
+   unless a genuine dependency requires another mode.
+
+   A focused Python unit test does not require Docker.
+   Real Docker-provider acceptance does require Docker.
+
+4. Trace the delivery chain where applicable:
+
+   Source revision
+     -> Tests and build
+     -> Immutable artifact
+     -> Approved deployment target
+     -> Health and readiness
+     -> Rollback or cleanup
+
+5. Identify which stages are already implemented
+   and which remain planned.
+
+6. Preserve:
+   - Credential security
+   - Target isolation
+   - Infrastructure state ownership
+   - Least-privilege permissions
+   - Idempotency
+   - Retry and recovery
+   - Resource ownership labels
+
+7. Validate locally or through static checks first.
+
+   Terraform plan is not proof of deployment.
+   Image publishing is not application deployment.
+
+8. Do not apply Terraform, deploy, modify live secrets,
+   destroy resources or run global Docker cleanup
+   without specific authorization.
+
+## Handoff
+
+Report:
+- Exact stage verified
+- Commands and actual results
+- Missing prerequisites
+- Rollback/recovery gaps
+
+Consult ops/AGENTS.md and docs/operations.md
+only for tasks involving those systems.

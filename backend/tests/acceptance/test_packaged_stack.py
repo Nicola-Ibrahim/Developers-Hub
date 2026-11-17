@@ -4,6 +4,7 @@ Run explicitly through pytest with PLATFORM_RUN_PACKAGED_ACCEPTANCE=1 and an exp
 PLATFORM_TEST_DOCKER_URL Unix socket. Uses local ports 8000 and 3000;
 Compose fails safely if they are occupied. Removes only its unique project and
 installation-labeled resource objects. Never prints generated credentials.
+The worker is added only to the disposable test model; local Compose stays core-only.
 """
 
 import base64
@@ -100,10 +101,6 @@ def test_packaged_stack():
                 project,
                 "-f",
                 str(root / "compose.yaml"),
-                "--profile",
-                "app",
-                "--profile",
-                "resources",
                 "config",
                 "--no-env-resolution",
                 "--format",
@@ -120,6 +117,24 @@ def test_packaged_stack():
                 "Cannot render isolated acceptance Compose model; private output suppressed"
             )
         model = json.loads(rendered.stdout)
+        # Provider acceptance owns its worker; it is not a local-stack service.
+        model["services"]["worker"] = {
+            **model["services"]["migrate"],
+            "command": ["python", "-m", "devops_platform.infra.workers.resource_worker"],
+            "restart": "unless-stopped",
+            "depends_on": {
+                "postgres": {"condition": "service_healthy"},
+                "migrate": {"condition": "service_completed_successfully"},
+            },
+            "volumes": [
+                {
+                    "type": "bind",
+                    "source": docker_url.removeprefix("unix://"),
+                    "target": "/var/run/docker.sock",
+                }
+            ],
+            "group_add": [env["PLATFORM_DOCKER_GID"]],
+        }
         for name, service in model["services"].items():
             service.pop("build", None)
             if name in {"postgres", "migrate", "api", "worker"}:
@@ -143,10 +158,6 @@ def test_packaged_stack():
             project,
             "-f",
             str(override),
-            "--profile",
-            "app",
-            "--profile",
-            "resources",
         ]
 
         def run(args, check=True):

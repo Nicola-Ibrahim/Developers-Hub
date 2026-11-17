@@ -1,20 +1,46 @@
 ---
 name: system-design
-description: Coordinate DevOps Hub changes spanning components or bounded contexts. Use for cross-component contracts, ownership, sequencing and acceptance; use a component skill alone for local work.
+description: Investigate or change Developers-Hub business concepts, bounded-context ownership, or cross-capability contracts.
 ---
 
-# Cross-component design
+# Domain and architecture discovery
 
-1. Identify affected components and load only their skills. Inspect current code,
-   callers, working-tree changes and any requested task record.
-2. Trace one end-to-end path, including ownership, state transitions, failures and
-   recovery. Separate observed behavior from assumptions.
-3. Assign every rule and side effect to one component. Define boundary contracts
-   and resolve compatibility, concurrency and recovery decisions.
-4. Record observable acceptance criteria, dependencies, file ownership and ordered
-   implementation. Planning does not authorize implementation or live operations.
-5. Implement contracts before dependents, integrate the complete flow and report
-   actual checks, review activity and remaining limits.
+Use for a substantial change where ownership of a concept,
+invariant or API across capabilities is uncertain.
+Not needed for ordinary implementation.
 
-Follow [workflow guidance](../../../.codex/workflow/README.md). Create a task record
-only when requested. The coordinator owns shared contracts and final integration.
+1. Identify the developer/operator outcome first;
+   explain who performs it and why.
+
+2. Trace one existing end-to-end workflow and compare
+   observed code with the proposed product model.
+
+3. Define the smallest consistent vocabulary:
+   - Project: team workspace
+   - Application: independently deployable unit
+   - Environment: logical deployment destination
+   - Deployment: release of an artifact
+   - Resource: managed infrastructure
+
+4. Name one owner for each invariant, state transition,
+   transaction and external effect.
+
+5. Distinguish business subdomains from implemented
+   bounded contexts. Default to the existing
+   Identity and DeveloperPlatform contexts.
+
+6. Propose the minimum changes and integration sequence.
+   Show a short diagram or table only when it helps.
+
+7. Return decisions, trade-offs, unknowns and observable
+   acceptance criteria to the coordinator.
+
+Do not create extensive plans or additional bounded
+contexts by default.
+
+The live conversation owns the current design decision.
+
+Write a durable decision note only when requested or
+when the decision must survive another work session.
+
+Investigation alone does not authorize implementation.

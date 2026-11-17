@@ -85,7 +85,9 @@ The source of truth for everything from incident response to system scaling.
 
 ### I'm Feature Building
 **Goal**: Daily development flow.
-- Use `scripts/dev.sh up` and `scripts/dev.sh down` to manage your local stack.
+- Open `scripts/dev.sh` for Docker/native development menus or `scripts/db.sh` for
+  explicit local migration actions. Direct `scripts/dev.sh up` and `down` remain
+  available; see the [script guide](docs/platform-dev.md).
 - Check the **[Secrets Manual](./docs/secrets.md)** if adding new API keys.
 
 ### I'm Scaling the System

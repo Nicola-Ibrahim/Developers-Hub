@@ -29,8 +29,6 @@ services:
       postgres:
         condition: service_healthy
     restart: "no"
-    profiles: [app]
-
   api:
     image: devops-hub-api:local
     build:
@@ -55,10 +53,9 @@ services:
       retries: 10
       start_period: 10s
     restart: unless-stopped
-    profiles: [app]
 
   opa:
-    image: openpolicyagent/opa:1.0.1
+    image: openpolicyagent/opa:1.0.1-static
     command: ["run", "--server", "--addr=0.0.0.0:8181", "/policies"]
     volumes: [./backend/src/identity/infra/authorization/policies:/policies:ro]
     networks: [control]
@@ -68,47 +65,6 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
-    profiles: [app]
-
-  worker:
-    image: devops-hub-api:local
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    command: ["python", "-m", "devops_platform.infra.workers.resource_worker"]
-    env_file:
-      - path: backend/.env
-        required: false
-    volumes: [/var/run/docker.sock:/var/run/docker.sock]
-    group_add: ["${PLATFORM_DOCKER_GID:-0}"]
-    networks: [control]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    profiles: [resources]
-
-  application-worker:
-    image: devops-hub-api:local
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    command: ["python", "-m", "devops_platform.infra.workers.application_worker"]
-    env_file:
-      - path: backend/.env
-        required: false
-    volumes: [/var/run/docker.sock:/var/run/docker.sock]
-    group_add: ["${PLATFORM_DOCKER_GID:-0}"]
-    networks: [control]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    profiles: [application-delivery]
 
   frontend:
     image: devops-hub-frontend:local
@@ -124,7 +80,6 @@ services:
       api:
         condition: service_healthy
     restart: unless-stopped
-    profiles: [app]
 
 networks:
   control:

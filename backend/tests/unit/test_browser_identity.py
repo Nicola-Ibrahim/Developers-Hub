@@ -7,10 +7,11 @@ from starlette.requests import Request
 
 from api.core.errors import APIError
 from api.identity.authentication.credentials import browser_credentials
-from identity.application.change_password.command import VerifyPasswordChange
-from identity.application.change_password.handler import VerifyPasswordChangeHandler
-from identity.application.login.command import VerifyLoginCredentials
-from identity.application.login.handler import VerifyLoginCredentialsHandler
+from identity.application.change_password.handler import (
+    PreparedPasswordChange,
+    verify_password_change,
+)
+from identity.application.login.handler import verify_login_credentials
 from identity.application.shared.principal import principal_for_project
 from identity.domain.browser_credentials import (
     normalize_user_name,
@@ -121,17 +122,17 @@ def test_browser_transport_parses_project_header_and_rejects_cookie_bearer_ambig
 def test_browser_login_uses_dummy_hash_for_missing_user_and_requires_active_account():
     hasher = ScryptPasswordHasher()
     dummy_hash = hasher.hash("devops-hub-dummy-password-value")
-    service = VerifyLoginCredentialsHandler(hasher, dummy_hash)
-
     async def check() -> tuple[object, object]:
-        missing = await service.execute(VerifyLoginCredentials("unknown", "wrong-password", None))
-        inactive = await service.execute(
-            VerifyLoginCredentials(
-                " Alice ",
-                "correct-horse-battery",
-                AccountCredentials(
-                    uuid4(), "alice", hasher.hash("correct-horse-battery"), 4, False, ()
-                ),
+        missing = await verify_login_credentials(
+            hasher, dummy_hash, "unknown", "wrong-password", None
+        )
+        inactive = await verify_login_credentials(
+            hasher,
+            dummy_hash,
+            " Alice ",
+            "correct-horse-battery",
+            AccountCredentials(
+                uuid4(), "alice", hasher.hash("correct-horse-battery"), 4, False, ()
             )
         )
         return missing, inactive
@@ -149,17 +150,17 @@ def test_password_change_checks_current_password_and_preserves_version_fence():
     account = AccountCredentials(
         uuid4(), "alice", hasher.hash("current-password-value"), 7, True, ()
     )
-    service = VerifyPasswordChangeHandler(hasher)
-
     async def check() -> None:
-        prepared = await service.execute(
-            VerifyPasswordChange(account, "current-password-value", "new-password-value")
+        prepared = await verify_password_change(
+            hasher, account, "current-password-value", "new-password-value"
         )
+        assert isinstance(prepared, PreparedPasswordChange)
         assert prepared.credential_version == 7
         assert hasher.verify("new-password-value", prepared.encoded_password)
+        assert "new-password-value" not in repr(prepared)
         with pytest.raises(BrowserAuthenticationRejected):
-            await service.execute(
-                VerifyPasswordChange(account, "incorrect-current-password", "another-new-password")
+            await verify_password_change(
+                hasher, account, "incorrect-current-password", "another-new-password"
             )
 
     asyncio.run(check())

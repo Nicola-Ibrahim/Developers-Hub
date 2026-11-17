@@ -3,9 +3,8 @@
 This guide describes the local Docker prototype and the separately documented
 release path. The local prototype needs no AWS account or GitHub integration; it
 does not make application previews or cloud deployment ready. The API and
-resource worker own developer-requested PostgreSQL resources. Both workers are
-optional: use `resources` for database provisioning and `application-delivery`
-for application delivery.
+resource worker own developer-requested PostgreSQL resources. Background workers
+are separate processes and are not included in the local core Compose stack.
 Publishing an image is not a deployment.
 
 ## Local Docker demo
@@ -31,67 +30,32 @@ The backend env file is shared by the local backend services, including
 PostgreSQL. It is not a per-process secret isolation boundary. Preserve it when
 stopping containers or retaining the database volume; restore it if lost.
 
-The normal `--profile app` Compose startup starts PostgreSQL 16, an explicit
-Alembic migration job, OPA, the FastAPI API and the Next.js dashboard. The
-resource worker uses the `resources` profile and the application worker uses
-`application-delivery`. Both use the backend image and wait for PostgreSQL health
-and successful migration. Resource requests remain queued and leases are not
-cleaned up while the resource worker is stopped.
-The API is published to host loopback on
-8000, the dashboard on 3000, and provisioned developer PostgreSQL endpoints are
-advertised on host loopback. PostgreSQL control-plane data uses a named volume.
-`docker compose --profile app --profile resources --profile application-delivery down`
-stops selected containers and preserves volumes;
-never add `-v` or run `docker system prune` as routine cleanup.
+The local Compose stack contains exactly five services: PostgreSQL (`postgres`),
+Alembic migrations (`migrate`), OPA, API and frontend. `scripts/dev.sh up` starts
+that stack with no profile selection. The API waits for database/OPA health and
+successful migration; the frontend waits for the API.
 
-Only worker services receive `/var/run/docker.sock`; the API and migration job do
-not. Access to that socket is equivalent to host root, so keep this prototype on
-a trusted developer machine. The script discovers the socket's group ID for the
-workers without making the API privileged. Do not publish the API or Docker
-socket to the public network.
+OPA uses the pinned `openpolicyagent/opa:1.0.1-static` multi-architecture image;
+Docker selects ARM64 or AMD64 for the host automatically. Do not force an AMD64
+platform on ARM machines. After changing from the previous image, refresh only
+OPA with `docker compose up -d --pull always --wait opa`.
 
-The backend image's entrypoint drops to its fixed non-root service UID. Local
-Compose injects `backend/.env` into PostgreSQL, migration, API and selected
-workers; it injects `frontend/.env` only into the dashboard. `compose.yaml` is
-for local development only. CI builds images and runs isolated test dependencies.
+The API binds to host loopback on port 8000 and the frontend on port 3000.
+PostgreSQL keeps its existing `control_plane_data` named volume. The OPA policies
+remain mounted read-only. No service mounts the Docker socket.
+`docker compose down` preserves the database volume; never add `-v` or run global
+prune as routine cleanup. The script removes obsolete service containers during
+startup/shutdown without deleting volumes.
 
-The resource worker's `PLATFORM_LOCAL_PROVIDER_ENABLED` setting defaults to
-false, so start it only after enabling and verifying the local target. The
-application worker receives no approved image list by default, so its
-Docker delivery adapter is not configured. The application worker process alone
-does not make previews provisionable or ready. Keep these defaults until local
-provider and application delivery readiness, digest approval, credential
-isolation, host networking, retry/restart and cleanup acceptance checks have
-passed.
+The backend image drops to its fixed non-root service UID. Compose injects
+`backend/.env` into PostgreSQL, migrations and API, and `frontend/.env` into the
+dashboard. This file is local-only; CI creates isolated test dependencies.
 
-After those acceptance checks, an operator can approve an image already built in
-the local Docker daemon by its immutable image ID. Replace `<local-tag>` with
-that image's local tag; this inspects metadata only and does not start a
-container:
-
-```sh
-docker image inspect --format '{{.Id}}' <local-tag>
-```
-
-The result must be exactly `sha256:` followed by 64 hexadecimal characters.
-Use the actual digest from `docker image inspect`, not the placeholder below.
-Put the approved digest and provider opt-in in the ignored `backend/.env` file.
-Then start both optional workers:
-
-```sh
-scripts/dev.sh up --resources --application-delivery
-```
-
-The approved image must be present in the local daemon; this flow needs no
-registry, GitHub integration or cloud credentials. Delivered app
-URLs bind to `127.0.0.1` only and are not reachable from other hosts. No payment
-provider is included. This prototype validates a local app/database and an
-in-process or mock payment path only. When a database is attached, the app and
-database use an internal-only Docker bridge network; external payment provider
-or sandbox connectivity may therefore be unavailable. External payment provider
-connectivity is separate work. Enabling the local provider is an operator action
-after acceptance; merely starting the worker never starts an application by
-itself.
+Resource and application workers are not started by Compose or internally by
+FastAPI. Requests that need those workers will remain pending, including resource
+provisioning and lease cleanup. Provider execution requires a separately configured
+and explicitly launched worker. Enabling a provider setting alone does not start
+one or establish readiness.
 
 The default catalog remains non-requestable until that acceptance is complete.
 The API's `/health/live` and `/health/ready` endpoints report process and DB/schema

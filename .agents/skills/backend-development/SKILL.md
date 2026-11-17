@@ -1,34 +1,56 @@
 ---
 name: backend-development
-description: Implement or review DevOps Hub Python domain, application, persistence and worker changes. Use for DDD, CQRS, resource lifecycle, providers or reconciliation; API-only work uses api-development.
+description: Consolidate or refactor an existing Developers-Hub backend use case across handlers, domain rules and repository ports.
 ---
 
-# Backend development
+# Backend use-case refactor
 
-Follow [backend architecture](../../../backend/AGENTS.md).
+Use for backend refactoring or a new business use case
+spanning multiple layers. Not every Python edit.
 
-1. Trace the use case from its host through application, domain, repository port
-   and adapter. Identify its invariant, transaction boundary and failure paths.
-2. Put each decision in its owning layer and keep the command/query beside its
-   handler. Define typed success data and typed failures before changing adapters
-   and callers.
-3. Wire the use case through its context module and DI, preserving the transaction,
-   permission, ownership, idempotency, recovery and secret rules in
-   `backend/AGENTS.md`.
-4. Verify the changed invariant and its failure path. Report simulated and real
-   provider evidence separately.
+## Procedure
 
-From `backend/`, select only affected checks:
+1. Start with the requested observable behavior.
+
+2. Trace all relevant entry points:
+   - HTTP, worker, operator or CLI
+   - Command/query registration
+   - Application handler
+   - Domain entity, aggregate or policy
+   - Repository port
+   - Persistence or provider adapter
+   - Existing tests
+
+3. Classify each operation as:
+   - Public business use case
+   - Trusted operator use case
+   - Internal workflow step
+   - Confirmed duplicate or dead code
+
+4. Choose one clear application orchestration path.
+
+   Internal checks may be ordinary methods or functions.
+   Do not generate a command/handler pair for every helper.
+   Do not introduce aggregates without meaningful invariants.
+
+5. Preserve:
+   - Authentication and authorization
+   - Sessions and CSRF protection
+   - Credential security
+   - Transaction boundaries
+   - Optimistic concurrency
+   - Idempotency and retry behavior
+   - Worker recovery and cleanup
+
+6. Remove obsolete code only after migrating all callers,
+   DI registrations, tests and imports.
+
+7. Run focused tests first.
+   Use disposable infrastructure for integration tests.
+
+## Useful search examples
 
 ```bash
-.venv/bin/ruff check src tests migrations
-.venv/bin/ruff format --check src tests migrations
-.venv/bin/mypy src
-.venv/bin/pytest -q -m 'not postgres'
-```
+rg 'LoginCommand|LoginHandler|BrowserIdentityService' backend/src backend/tests
 
-PostgreSQL tests require an explicit disposable `PLATFORM_TEST_DATABASE_URL`;
-read `tests/conftest.py` before running `-m postgres`. Real Docker acceptance must
-use owned disposable resources and private generated credentials. Never use global
-prune, a shared developer database or printed connection secrets. A routine small
-fix needs no task record.
+rg 'RegisterProjectCommand|CreateApplication|ApplicationDelivery' backend/src backend/tests

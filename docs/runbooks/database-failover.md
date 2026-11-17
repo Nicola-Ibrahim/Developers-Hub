@@ -4,8 +4,8 @@ The control-plane service is named `postgres`. This repository does not implemen
 automatic database failover. Diagnose without removing its data:
 
 ```sh
-docker compose --profile app ps
-docker compose --profile app exec postgres pg_isready -U platform -d platform
+docker compose ps
+docker compose exec postgres pg_isready -U platform -d platform
 ```
 
 If authentication fails, restore the existing private `backend/.env` credentials.

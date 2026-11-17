@@ -1,32 +1,57 @@
 ---
 name: frontend-development
-description: Design and implement DevOps Hub Next.js dashboard flows, accessibility, API integration and frontend verification. Use for dashboard work; excludes backend-only changes.
+description: Change an existing Developers-Hub Next.js portal workflow or its integration with an API endpoint.
 ---
 
-# Frontend development
+# Developer portal workflow
 
-Follow [frontend architecture](../../../frontend/AGENTS.md) and
-[design guidance](../../../frontend/DESIGN.md). Those files own durable rules;
-this skill owns the working procedure.
+Use for a concrete user flow, not generic frontend work.
 
-1. Trace the URL and developer action through page/layout, feature state, transport
-   and backend contract. Inspect the current migration status and callers before
-   moving code. Identify session/project ownership and failure behavior.
-2. Assign route, feature and shared responsibilities before editing. For structural
-   work, define preserved URLs, typed contracts and server/client boundaries first;
-   migrate dependents together. Load system-design when contracts cross components.
-3. For visual work, define information priority and precise capability wording.
-   Start with a representative screen and its loading, empty, denied, error and
-   operation states; apply the agreed tokens and motion consistently. Use available
-   design tools when relevant and requested, without treating mockups as behavior.
-4. Implement one coherent flow. Preserve project/session invalidation, CSRF,
-   idempotency, secret clearing and polling cleanup under the architecture rules.
-   Keep shared contracts settled before splitting independent file ownership.
-5. Select checks for the changed behavior: direct links and history; project switch
-   during a request; expiry versus outage; failed mutation/retry; and secret reveal
-   cleanup where affected. Check narrow screens, keyboard/focus, overflow, textual
-   status and reduced motion for visual changes. Report actual browser evidence
-   separately from type/build results and identify unavailable checks.
+## Procedure
 
-Use `npm run typecheck` and `npm run build` as applicable. A successful build does
-not prove authentication, authorization, proxy/CSRF behavior or visual quality.
+1. Trace the affected page or feature through:
+   - User interaction
+   - Frontend state
+   - API client
+   - Session/project context
+   - Backend contract
+
+2. Handle relevant UI states:
+   - Loading
+   - Empty
+   - Permission denied
+   - Operation in progress
+   - Failed
+   - Retry or recovery
+
+3. Keep Next.js server/client responsibilities explicit.
+
+4. Never expose resource credentials in:
+   - Logs
+   - URLs
+   - Persistent browser storage
+   - Unrelated UI components
+
+5. Prefer existing UI patterns.
+   Avoid introducing another state-management
+   framework for a small feature.
+
+6. Validate the requested user journey, including:
+   - Project switching
+   - Session expiration
+   - Failed requests
+   - Pending asynchronous operations
+
+7. Run relevant type/build checks.
+   Distinguish successful builds from actual browser tests.
+
+## Handoff
+
+Report:
+- Observable user outcome
+- API integration changes
+- Verification performed
+- Untested scenarios
+
+Consult frontend/AGENTS.md and frontend/DESIGN.md
+only when relevant to the change.
