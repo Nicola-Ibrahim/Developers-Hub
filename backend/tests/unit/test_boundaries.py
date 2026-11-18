@@ -49,14 +49,17 @@ IO_LIBRARIES = {
 # Application and domain imports remain isolated.
 SHARED_SCHEMA_IMPORTS = {
     "identity.infra.persistence.repositories.accounts_sessions": {
-        "devops_platform.infra.persistence.models.project_access",
-        "devops_platform.infra.persistence.models.project_access.ProjectMembershipRow",
-        "devops_platform.infra.persistence.models.project_access.ProjectRow",
+        "devops_platform.infra.persistence.repositories.project_access",
+        "devops_platform.infra.persistence.repositories.project_access.lock_user_project_access",
+        "devops_platform.infra.persistence.repositories.project_access.project_membership_role",
+        "devops_platform.infra.persistence.repositories.project_access.project_memberships",
     },
     "identity.infra.persistence.repositories.api_tokens": {
         "devops_platform.infra.persistence.models.project_access",
         "devops_platform.infra.persistence.models.project_access.ProjectMembershipRow",
-        "devops_platform.infra.persistence.models.project_access.ProjectRow",
+        "devops_platform.infra.persistence.repositories.project_access",
+        "devops_platform.infra.persistence.repositories.project_access.ensure_project_membership",
+        "devops_platform.infra.persistence.repositories.project_access.lock_named_project",
     },
     "devops_platform.infra.persistence.repositories.project_access": {
         "identity.infra.persistence.models.user",
@@ -105,6 +108,11 @@ def violation(module, target):
     if module_context:
         layer_parts = module_parts[1:2]
         if module.startswith(module_context + ".infra.workers.") and other == "composition":
+            return False
+        if target in {
+            "shared.application.interfaces.unit_of_work",
+            "shared.application.interfaces.unit_of_work.UnitOfWork",
+        }:
             return False
         if target == "shared.dispatch" or target.startswith("shared.dispatch."):
             return False  # Pure cross-context message/handler contract.

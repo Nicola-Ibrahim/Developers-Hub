@@ -14,8 +14,16 @@ from identity.infra.persistence.repositories.accounts_sessions import SQLAlchemy
 
 def identity_repository_for_session(session: AsyncSession) -> SQLAlchemyIdentityRepository:
     rules = SQLAlchemyProjectAccessRules(session)
+    return SQLAlchemyIdentityRepository(session, project_access_rules=rules)
+
+
+def project_access_repository_for_session(
+    session: AsyncSession,
+) -> SQLAlchemyProjectAccessRepository:
+    """Build the Platform membership repository directly on the caller's session."""
+    rules = SQLAlchemyProjectAccessRules(session)
     identity = SQLAlchemyIdentityRepository(session, project_access_rules=rules)
-    access = SQLAlchemyProjectAccessRepository(
+    return SQLAlchemyProjectAccessRepository(
         session=session,
         rules=rules,
         user_row=InternalUserRow,
@@ -23,5 +31,3 @@ def identity_repository_for_session(session: AsyncSession) -> SQLAlchemyIdentity
         validation_error=IdentityValidationError,
         authorization_error=BrowserAuthenticationRejected,
     )
-    identity.attach_project_access_repository(access)
-    return identity

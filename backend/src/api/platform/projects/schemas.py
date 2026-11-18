@@ -1,6 +1,9 @@
 """Project HTTP response models."""
 
+from typing import Literal
 from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict
 
 from api.core.schemas import Contract
 
@@ -18,3 +21,8 @@ class ProjectRegistrationView(Contract):
     repository: str | None
     configured: bool
     environments: list[EnvironmentView]
+
+
+class MembershipBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["developer", "admin"]

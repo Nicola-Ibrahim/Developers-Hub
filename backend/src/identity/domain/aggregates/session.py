@@ -1,6 +1,6 @@
 """Browser session entity without raw session or CSRF secrets."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -16,6 +16,12 @@ class Session:
     expiry: SessionExpiry
     revoked_at: datetime | None
     credential_version: int
+
+    def revoke(self, at: datetime) -> "Session":
+        """Return the revoked session, preserving the first revocation time."""
+        if self.revoked_at is not None:
+            return self
+        return replace(self, revoked_at=at)
 
     def accepts(self, *, now: datetime, user_active: bool, credential_version: int) -> bool:
         return (

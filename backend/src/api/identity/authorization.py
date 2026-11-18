@@ -11,6 +11,7 @@ from identity.application.interfaces.authorization import (
     AuthorizationUnavailable,
 )
 from identity.application.interfaces.dispatch import IdentityModule
+from identity.domain.records import SessionPrincipal
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ async def require_identity_permission(
     resource_id: UUID | None = None,
     project_id: UUID | None = None,
     owner_id: UUID | None = None,
-) -> None:
+) -> SessionPrincipal:
     principal = await module.query(AuthenticateSessionQuery(session_token, project_id))
     request = AuthorizationRequest(
         subject_id=principal.user_id,
@@ -55,3 +56,4 @@ async def require_identity_permission(
     )
     if not decision.allowed:
         raise APIError(403, "forbidden", "Permission denied")
+    return principal

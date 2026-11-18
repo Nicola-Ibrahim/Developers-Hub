@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import pytest
 
+from devops_platform.domain.aggregates.project_access import ProjectAccess
 from devops_platform.domain.aggregates.resource_lifecycle import ResourceLifecycle
 from devops_platform.domain.entities.project_membership import ProjectMembership
 from devops_platform.domain.errors import DomainError, InvalidProjectRole
@@ -26,6 +27,21 @@ def test_membership_role_change_preserves_identity_and_validates_role() -> None:
 
     with pytest.raises(InvalidProjectRole):
         membership.change_role("owner")
+
+
+def test_project_membership_change_preserves_admin_and_disallows_self_demotion() -> None:
+    actor, member = uuid4(), uuid4()
+    with pytest.raises(DomainError, match="retain at least one"):
+        ProjectAccess(1).require_membership_change(
+            actor_id=actor, member_id=member, current_role="admin", role=None
+        )
+    ProjectAccess(2).require_membership_change(
+        actor_id=actor, member_id=member, current_role="admin", role=None
+    )
+    with pytest.raises(DomainError, match="Ask another"):
+        ProjectAccess(2).require_membership_change(
+            actor_id=actor, member_id=actor, current_role="admin", role="developer"
+        )
 
 
 def _resource(now: datetime) -> ResourceLifecycle:

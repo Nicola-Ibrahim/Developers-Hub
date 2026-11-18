@@ -16,16 +16,6 @@ from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.handler import LoginHandler
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
-from identity.application.project_access.list_project_members.handler import (
-    ListProjectMembersHandler,
-)
-from identity.application.project_access.list_project_members.query import ListProjectMembersQuery
-from identity.application.project_access.manage_project_membership.command import (
-    ManageProjectMembershipCommand,
-)
-from identity.application.project_access.manage_project_membership.handler import (
-    ManageProjectMembershipHandler,
-)
 from identity.application.sessions.list_sessions.handler import ListSessionsHandler
 from identity.application.sessions.list_sessions.query import ListSessionsQuery
 from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand
@@ -51,13 +41,11 @@ IDENTITY_HANDLER_REGISTRY = HandlerRegistry(
         (RevokeAllSessionsCommand, RevokeAllSessionsHandler),
         (RevokeSessionCommand, RevokeSessionHandler),
         (ChangePasswordCommand, ChangePasswordHandler),
-        (ManageProjectMembershipCommand, ManageProjectMembershipHandler),
     ),
     queries=(
         (AuthenticateApiTokenQuery, AuthenticateApiTokenHandler),
         (AuthenticateSessionQuery, AuthenticateSessionHandler),
         (ListSessionsQuery, ListSessionsHandler),
-        (ListProjectMembersQuery, ListProjectMembersHandler),
     ),
     required_commands=(
         LoginCommand,
@@ -67,13 +55,11 @@ IDENTITY_HANDLER_REGISTRY = HandlerRegistry(
         RevokeAllSessionsCommand,
         RevokeSessionCommand,
         ChangePasswordCommand,
-        ManageProjectMembershipCommand,
     ),
     required_queries=(
         AuthenticateApiTokenQuery,
         AuthenticateSessionQuery,
         ListSessionsQuery,
-        ListProjectMembersQuery,
     ),
 )
 

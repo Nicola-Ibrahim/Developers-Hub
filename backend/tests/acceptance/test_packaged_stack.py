@@ -222,8 +222,10 @@ import asyncio, json
 from pathlib import Path
 from composition.container import BackendContainer
 from composition.integrations.project_registration import RegisterProjectCommandHandler
-from identity.application.accounts.bootstrap_first_admin.command import BootstrapFirstAdminCommand
-from identity.application.accounts.bootstrap_first_admin.handler import BootstrapFirstAdminHandler
+from devops_platform.application.project_access.bootstrap_first_admin import (
+    BootstrapFirstAdmin,
+    BootstrapFirstAdminHandler,
+)
 from identity.application.accounts.create_user.command import CreateUserCommand
 from identity.application.accounts.create_user.handler import CreateUserHandler
 from devops_platform.application.projects.command import RegisterProjectCommand
@@ -245,7 +247,7 @@ async def seed():
                 Path("/run/platform-secrets/acceptance_password").read_text().strip()
             )
             user_id = await create_user.execute(CreateUserCommand("demo", password))
-            await bootstrap.execute(BootstrapFirstAdminCommand(user_id, project.project_id))
+            await bootstrap.execute(BootstrapFirstAdmin(user_id, project.project_id))
         print(
             json.dumps({"project_id": str(project.project_id), "user_id": str(user_id)})
         )

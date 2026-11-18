@@ -4,24 +4,20 @@ from uuid import uuid4
 
 import pytest
 
-from composition.integrations.project_access import ProjectAccessApplicationBridge
+from devops_platform.application.project_access.manage_project_membership import (
+    ListProjectMembers,
+    ListProjectMembersHandler,
+    ManageProjectMembership,
+    ManageProjectMembershipHandler,
+)
+from devops_platform.application.shared.dto import AccessContext
+from devops_platform.domain.errors import InvalidProjectRole
 from identity.application.accounts.create_user.command import CreateUserCommand
 from identity.application.accounts.create_user.handler import CreateUserHandler
 from identity.application.authentication.authenticate_session.handler import (
     AuthenticateSessionHandler,
 )
 from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
-from identity.application.project_access.list_project_members.handler import (
-    ListProjectMembersHandler,
-)
-from identity.application.project_access.list_project_members.query import ListProjectMembersQuery
-from identity.application.project_access.manage_project_membership.command import (
-    SetProjectMembershipCommand,
-)
-from identity.application.project_access.manage_project_membership.handler import (
-    SetProjectMembershipHandler,
-)
-from identity.domain.errors import IdentityValidationError
 from identity.domain.records import SessionPrincipal
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
@@ -64,11 +60,17 @@ def test_membership_command_validates_project_role_before_persistence() -> None:
         async def set_membership(self, **values):
             raise AssertionError(f"unexpected persistence call: {values}")
 
-    with pytest.raises(IdentityValidationError, match="role"):
+    actor_id, project_id = uuid4(), uuid4()
+    with pytest.raises(InvalidProjectRole, match="role"):
         asyncio.run(
-            SetProjectMembershipHandler(
-                Transaction(Repository()), ProjectAccessApplicationBridge(), lambda: NOW
-            ).execute(SetProjectMembershipCommand(uuid4(), uuid4(), uuid4(), "owner"))
+            ManageProjectMembershipHandler(Repository(), lambda: NOW).execute(
+                ManageProjectMembership(
+                    AccessContext(actor_id, project_id, "admin", frozenset({"resources:write"})),
+                    project_id,
+                    uuid4(),
+                    "owner",
+                )
+            )
         )
 
 
@@ -76,20 +78,18 @@ def test_project_member_query_is_read_only_and_receives_authorized_actor() -> No
     actor_id, project_id = uuid4(), uuid4()
 
     class ReadRepository:
-        async def authenticate_session(self, **values):
-            return SessionPrincipal(
-                actor_id, "dev", uuid4(), project_id, None, None, (), (), ""
-            ), ""
-
         async def list_project_members(self, *, actor_id, project_id):
             self.values = (actor_id, project_id)
             return ()
 
     repository = ReadRepository()
     result = asyncio.run(
-        ListProjectMembersHandler(
-            Transaction(repository), ProjectAccessApplicationBridge(), lambda: NOW, str
-        ).execute(ListProjectMembersQuery("session", project_id))
+        ListProjectMembersHandler(repository).execute(
+            ListProjectMembers(
+                AccessContext(actor_id, project_id, "admin", frozenset({"resources:read"})),
+                project_id,
+            )
+        )
     )
 
     assert result == ()

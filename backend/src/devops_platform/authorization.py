@@ -17,6 +17,10 @@ from devops_platform.application.applications.read_applications.query import (
     ReadDeploymentHistory,
 )
 from devops_platform.application.applications.read_templates.query import ReadTemplates
+from devops_platform.application.project_access.manage_project_membership import (
+    ListProjectMembers,
+    ManageProjectMembership,
+)
 from devops_platform.application.resource_management.catalog.query import ReadCatalog
 from devops_platform.application.resource_management.delete_database.command import (
     DeleteDatabase,
@@ -77,6 +81,8 @@ class ActionPermission:
 
 
 ACTION_PERMISSIONS: dict[type[object], ActionPermission] = {
+    ListProjectMembers: ActionPermission("resources:read", "project"),
+    ManageProjectMembership: ActionPermission("resources:write", "project"),
     ReadCatalog: ActionPermission("catalog:read"),
     ReadProject: ActionPermission("resources:read", "project"),
     ReadProjects: ActionPermission("resources:read", "memberships"),

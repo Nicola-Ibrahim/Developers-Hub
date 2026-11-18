@@ -23,6 +23,12 @@ from devops_platform.application.applications.read_templates.handler import (
     ReadTemplatesHandler,
 )
 from devops_platform.application.applications.read_templates.query import ReadTemplates
+from devops_platform.application.project_access.manage_project_membership import (
+    ListProjectMembers,
+    ListProjectMembersHandler,
+    ManageProjectMembership,
+    ManageProjectMembershipHandler,
+)
 from devops_platform.application.resource_management.catalog.handler import ReadCatalogQueryHandler
 from devops_platform.application.resource_management.catalog.query import ReadCatalog
 from devops_platform.application.resource_management.delete_database.command import (
@@ -114,6 +120,7 @@ PLATFORM_HANDLER_REGISTRY = HandlerRegistry(
         (DeployApplication, DeployApplicationHandler),
         (RetryDeliveryStep, RetryDeliveryStepHandler),
         (ProcessGithubPreviewWebhook, ProcessGithubPreviewWebhookHandler),
+        (ManageProjectMembership, ManageProjectMembershipHandler),
     ),
     queries=(
         (ReadCatalog, ReadCatalogQueryHandler),
@@ -128,6 +135,7 @@ PLATFORM_HANDLER_REGISTRY = HandlerRegistry(
         (ReadApplications, ReadApplicationsHandler),
         (ReadApplication, ReadApplicationHandler),
         (ReadDeploymentHistory, ReadDeploymentHistoryHandler),
+        (ListProjectMembers, ListProjectMembersHandler),
     ),
 )
 

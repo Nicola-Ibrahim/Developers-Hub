@@ -20,6 +20,10 @@ from devops_platform.application.applications.read_applications.query import (
 )
 from devops_platform.application.applications.read_templates.query import ReadTemplates
 from devops_platform.application.module import DeveloperPlatformModule
+from devops_platform.application.project_access.manage_project_membership import (
+    ListProjectMembers,
+    ManageProjectMembership,
+)
 from devops_platform.application.resource_management.read_resources.query import (
     ReadProjects,
 )
@@ -55,6 +59,7 @@ _DELIVERY_MESSAGES = (
     ReadDeploymentHistory,
     ProcessGithubPreviewWebhook,
 )
+_MUTATING_BROWSER_MESSAGES = (ManageProjectMembership,)
 
 
 class PlatformRequestModule(DeveloperPlatformModule):
@@ -120,9 +125,35 @@ class PlatformRequestModule(DeveloperPlatformModule):
                 )
                 current = cast(MessageT, replace(message, accesses=accesses))
             else:
-                access = await authenticate_platform_access(
-                    unit.session, token, self._settings, self._clock
-                )
+                if isinstance(token, BrowserRequestCredentials) and isinstance(
+                    message, (ListProjectMembers, *_MUTATING_BROWSER_MESSAGES)
+                ):
+                    project_id = message.project_id
+                    principal = await authenticate_browser_operation(
+                        unit.session,
+                        token.session_token,
+                        project_id,
+                        self._clock,
+                        token.csrf_token,
+                        token.origin,
+                        self._settings.browser_allowed_origins,
+                        isinstance(message, _MUTATING_BROWSER_MESSAGES),
+                        self._settings.token_pepper.get_secret_value(),
+                    )
+                    if principal.project_id is None or principal.role not in {"developer", "admin"}:
+                        raise PlatformRequestError(
+                            "project_required", "Select an authorized project", 409
+                        )
+                    access = AccessContext(
+                        principal.user_id,
+                        principal.project_id,
+                        cast(Literal["developer", "admin"], principal.role),
+                        frozenset(principal.scopes),
+                    )
+                else:
+                    access = await authenticate_platform_access(
+                        unit.session, token, self._settings, self._clock
+                    )
                 if isinstance(message, ReadProjects):
                     current = cast(MessageT, replace(message, accesses=(access,)))
                 else:

@@ -14,9 +14,9 @@ from api.identity.authentication.credentials import (
 from api.identity.authentication.routes import router as authentication_router
 from api.identity.authentication.schemas import ProjectBody
 from api.identity.authorization import require_identity_permission
-from api.identity.memberships.routes import router as memberships_router
 from api.identity.principal.routes import router as principal_router
 from api.identity.sessions.routes import router as sessions_router
+from api.platform.projects.memberships import router as memberships_router
 from identity.application.interfaces.authorization import AuthorizationDecisionPort
 from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
 from identity.application.interfaces.dispatch import IdentityModule
@@ -68,7 +68,7 @@ async def identity_route_permission(
             project_id = ProjectBody.model_validate(await request.json()).project_id
         except ValueError:
             raise APIError(422, "invalid_request", "Request validation failed") from None
-    await require_identity_permission(
+    principal = await require_identity_permission(
         module=module,
         authorizer=authorizer,
         session_token=require_cookie_session(credentials),
@@ -79,6 +79,7 @@ async def identity_route_permission(
         resource_id=session_id,
         project_id=project_id,
     )
+    request.state.identity_principal = principal
 
 
 router = APIRouter(prefix="/api/v1")

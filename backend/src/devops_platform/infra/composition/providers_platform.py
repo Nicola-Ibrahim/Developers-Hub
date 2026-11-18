@@ -6,6 +6,14 @@ from dataclasses import asdict
 
 from dishka import Provider, Scope, provide
 
+from devops_platform.application.project_access.bootstrap_first_admin import (
+    BootstrapFirstAdminHandler,
+)
+from devops_platform.application.project_access.manage_project_membership import (
+    ListProjectMembersHandler,
+    ManageProjectMembershipHandler,
+    ProjectAccessRepository,
+)
 from devops_platform.application.projects.handler import RegisterProjectHandler
 from devops_platform.application.projects.port import ProjectRegistrationRepository
 from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
@@ -56,6 +64,15 @@ class PlatformProvider(Provider):
         provides=ProjectAccessDirectory,
         scope=Scope.REQUEST,
     )
+    list_project_members = provide(ListProjectMembersHandler, scope=Scope.REQUEST)
+    bootstrap_first_admin = provide(BootstrapFirstAdminHandler, scope=Scope.REQUEST)
+
+    @provide(scope=Scope.REQUEST)
+    def manage_project_membership(
+        self, repository: ProjectAccessRepository, clock: Clock
+    ) -> ManageProjectMembershipHandler:
+        return ManageProjectMembershipHandler(repository, clock)
+
     project_handler = provide(ReadProjectHandler, scope=Scope.REQUEST)
     projects_handler = provide(ReadProjectsHandler, scope=Scope.REQUEST)
     resources_handler = provide(ReadResourcesHandler, scope=Scope.REQUEST)

@@ -33,7 +33,3 @@ class UserRepository(Protocol):
     async def set_user_active(
         self, *, actor_id: UUID, user_id: UUID, active: bool, now: datetime
     ) -> None: ...
-
-    async def bootstrap_first_project_admin(
-        self, *, user_id: UUID, project_id: UUID, now: datetime
-    ) -> None: ...

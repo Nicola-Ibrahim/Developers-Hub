@@ -7,7 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
+from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow
+from devops_platform.infra.persistence.repositories.project_access import (
+    ensure_project_membership,
+    lock_named_project,
+)
 from identity.application.shared.errors import IdentityUnavailable
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.domain.errors import IdentityValidationError
@@ -61,25 +65,19 @@ class SQLAlchemyApiTokenRepository:
         self, *, user_name: str, project_name: str, new_role: str
     ) -> ProjectMembershipStatus:
         try:
+            project_id = await lock_named_project(self._session, project_name)
+            if project_id is None:
+                raise IdentityValidationError("Register project before issuing tokens")
             user = await self._session.scalar(
-                select(InternalUserRow).where(InternalUserRow.name == user_name)
+                select(InternalUserRow).where(InternalUserRow.name == user_name).with_for_update()
             )
             if user is None:
                 user = InternalUserRow(name=user_name)
                 self._session.add(user)
                 await self._session.flush()
-            project = await self._session.scalar(
-                select(ProjectRow).where(ProjectRow.name == project_name)
-            )
-            if project is None:
-                raise IdentityValidationError("Register project before issuing tokens")
-            membership = await self._session.get(ProjectMembershipRow, (user.id, project.id))
-            if membership is None:
-                self._session.add(
-                    ProjectMembershipRow(user_id=user.id, project_id=project.id, role=new_role)
-                )
+            await ensure_project_membership(self._session, user.id, project_id, new_role)
             return ProjectMembershipStatus(
-                user_id=user.id, project_id=project.id, user_active=user.active
+                user_id=user.id, project_id=project_id, user_active=user.active
             )
         except SQLAlchemyError as exc:
             raise IdentityUnavailable() from exc

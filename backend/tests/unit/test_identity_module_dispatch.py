@@ -15,10 +15,6 @@ from identity.application.authentication.authenticate_session.query import Authe
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.handler import LoginHandler
 from identity.application.authentication.logout.command import LogoutCommand
-from identity.application.project_access.list_project_members.query import ListProjectMembersQuery
-from identity.application.project_access.manage_project_membership.command import (
-    ManageProjectMembershipCommand,
-)
 from identity.application.sessions.list_sessions.query import ListSessionsQuery
 from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand
 from identity.application.sessions.revoke_session.command import RevokeSessionCommand
@@ -51,13 +47,11 @@ def test_identity_messages_have_explicit_complete_registrations() -> None:
         RevokeAllSessionsCommand,
         RevokeSessionCommand,
         ChangePasswordCommand,
-        ManageProjectMembershipCommand,
     }
     assert set(IDENTITY_HANDLER_REGISTRY.queries) == {
         AuthenticateApiTokenQuery,
         AuthenticateSessionQuery,
         ListSessionsQuery,
-        ListProjectMembersQuery,
     }
 
 

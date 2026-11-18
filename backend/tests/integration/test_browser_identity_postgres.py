@@ -9,8 +9,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for
 
-from composition.integrations.project_access import ProjectAccessApplicationBridge
-from composition.integrations.project_access_persistence import identity_repository_for_session
+from composition.integrations.project_access_persistence import (
+    identity_repository_for_session,
+    project_access_repository_for_session,
+)
+from devops_platform.application.project_access.manage_membership import set_membership
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
 from identity.application.accounts.complete_password_setup.command import (
     CompletePasswordSetupCommand,
@@ -32,21 +35,14 @@ from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.handler import LoginHandler
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
-from identity.application.project_access.list_project_members.handler import (
-    ListProjectMembersHandler,
-)
-from identity.application.project_access.list_project_members.query import ListProjectMembersQuery
-from identity.application.project_access.manage_project_membership.command import (
-    SetProjectMembershipCommand,
-)
-from identity.application.project_access.manage_project_membership.handler import (
-    SetProjectMembershipHandler,
-)
 from identity.application.sessions.rotate_csrf.command import RotateCsrfCommand
 from identity.application.sessions.rotate_csrf.handler import RotateCsrfHandler
 from identity.domain.browser_errors import BrowserAuthenticationRejected
 from identity.domain.errors import IdentityValidationError
 from identity.infra.composition.browser_transactions import SqlAlchemyIdentityTransaction
+from identity.infra.composition.session_revocation_unit_of_work import (
+    IdentitySessionRevocationUnitOfWork,
+)
 from identity.infra.persistence.models.activity import IdentityActivityRow
 from identity.infra.persistence.models.session import (
     BrowserLoginThrottleRow,
@@ -58,6 +54,7 @@ from identity.infra.security.browser_tokens import JwtBrowserSessionTokens
 from identity.infra.security.login_verifier import LoginCredentialVerifier
 from identity.infra.security.passwords import ScryptPasswordHasher
 from identity.infra.security.tokens import PepperedTokenHasher, SecureTokenGenerator
+from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
 pytestmark = pytest.mark.postgres
 
@@ -83,11 +80,7 @@ def test_deactivation_and_role_change_cannot_remove_both_admins(postgres_engine)
             return await asyncio.wait_for(
                 asyncio.gather(
                     identity.execute(SetUserStatusCommand(second_admin, first_admin, False)),
-                    identity.execute(
-                        SetProjectMembershipCommand(
-                            first_admin, second_admin, project_id, "developer"
-                        )
-                    ),
+                    identity.set_membership(first_admin, second_admin, project_id, "developer"),
                     return_exceptions=True,
                 ),
                 timeout=10,
@@ -112,6 +105,8 @@ def test_deactivation_and_role_change_cannot_remove_both_admins(postgres_engine)
 
 class IdentityFixture:
     def __init__(self, sessions, clock):
+        self.sessions = sessions
+        self.clock = clock
         transaction = SqlAlchemyIdentityTransaction(sessions, identity_repository_for_session)
         passwords = ScryptPasswordHasher()
         tokens = SecureTokenGenerator()
@@ -135,19 +130,48 @@ class IdentityFixture:
             CompletePasswordSetupCommand: CompletePasswordSetupHandler(
                 transaction, passwords, clock, digest
             ),
-            SetProjectMembershipCommand: SetProjectMembershipHandler(
-                transaction, ProjectAccessApplicationBridge(), clock
-            ),
-            ListProjectMembersQuery: ListProjectMembersHandler(
-                transaction, ProjectAccessApplicationBridge(), clock, digest
-            ),
             AuthenticateSessionQuery: AuthenticateSessionHandler(transaction, clock, digest),
             RotateCsrfCommand: RotateCsrfHandler(transaction, clock, digest, tokens.generate),
-            LogoutCommand: LogoutHandler(transaction, clock, digest, (ORIGIN,)),
+            LogoutCommand: self._logout_handler(clock, digest),
         }
+
+    def _logout_handler(self, clock, digest):
+        fixture = self
+
+        class Logout:
+            async def execute(self, command):
+                async with fixture.sessions() as session:
+                    repository = SQLAlchemyIdentityRepository(session)
+                    return await LogoutHandler(
+                        repository,
+                        repository,
+                        IdentitySessionRevocationUnitOfWork(SqlAlchemyUnitOfWork(session)),
+                        clock,
+                        digest,
+                        (ORIGIN,),
+                    ).execute(command)
+
+        return Logout()
 
     async def execute(self, message):
         return await self.handlers[type(message)].execute(message)
+
+    async def set_membership(self, actor_id, user_id, project_id, role):
+        async with self.sessions() as session, session.begin():
+            await set_membership(
+                project_access_repository_for_session(session),
+                actor_id=actor_id,
+                user_id=user_id,
+                project_id=project_id,
+                role=role,
+                now=self.clock(),
+            )
+
+    async def list_project_members(self, actor_id, project_id):
+        async with self.sessions() as session, session.begin():
+            return await project_access_repository_for_session(session).list_project_members(
+                actor_id=actor_id, project_id=project_id
+            )
 
 
 def perform_login(identity, user_name, password, project_id, origin):
@@ -187,22 +211,18 @@ def test_browser_session_survives_service_restart_and_revokes_on_password_reset(
         assert login.session_token not in repr(login)
         with pytest.raises(IdentityValidationError):
             await first_service.execute(
-                SetProjectMembershipCommand(user_id, user_id, project_id, "developer")
+                first_service.set_membership(user_id, user_id, project_id, "developer")
             )
-        members = await first_service.execute(
-            ListProjectMembersQuery(login.session_token, project_id)
-        )
-        assert len(members) == 1 and members[0].user_id == user_id
+        await first_service.execute(AuthenticateSessionQuery(login.session_token, project_id))
+        members = await first_service.list_project_members(user_id, project_id)
+        assert len(members) == 1 and members[0][0] == user_id
         added_id = await first_service.execute(
             CreateUserCommand(f"member-{uuid4()}", "a-different-safe-password", user_id)
         )
-        await first_service.execute(
-            SetProjectMembershipCommand(user_id, added_id, project_id, "developer")
-        )
-        members = await first_service.execute(
-            ListProjectMembersQuery(login.session_token, project_id)
-        )
-        assert {member.user_id for member in members} == {user_id, added_id}
+        await first_service.set_membership(user_id, added_id, project_id, "developer")
+        await first_service.execute(AuthenticateSessionQuery(login.session_token, project_id))
+        members = await first_service.list_project_members(user_id, project_id)
+        assert {member[0] for member in members} == {user_id, added_id}
 
         # A newly composed service can authenticate the digest persisted by the first.
         restarted = IdentityFixture(sessions, lambda: current_time[0])
@@ -315,7 +335,8 @@ def test_authorized_browser_activity_refreshes_idle_expiry(postgres_engine):
     async def exercise():
         login = await perform_login(service, user_name, PASSWORD, project_id, ORIGIN)
         now[0] += timedelta(minutes=20)
-        members = await service.execute(ListProjectMembersQuery(login.session_token, project_id))
+        await service.execute(AuthenticateSessionQuery(login.session_token, project_id))
+        members = await service.list_project_members(_user_id, project_id)
         assert len(members) == 1
 
         with Session(postgres_engine) as session:
@@ -371,9 +392,7 @@ def test_membership_update_and_session_authorization_share_lock_order(postgres_e
                 assert principal is not None
 
         async def update_membership(role: str):
-            await service.execute(
-                SetProjectMembershipCommand(second_admin_id, user_id, project_id, role)
-            )
+            await service.set_membership(second_admin_id, user_id, project_id, role)
 
         # Repeated simultaneous reads and membership writes would form a
         # user/project lock cycle if authorization acquired session/user first.
