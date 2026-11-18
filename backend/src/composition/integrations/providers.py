@@ -4,17 +4,32 @@ from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from composition.integrations.application_resources import LedgerApplicationResources
+from composition.integrations.project_access import ProjectAccessApplicationBridge
+from composition.integrations.project_access_persistence import identity_repository_for_session
 from composition.integrations.project_registration import RegisterProjectCommandHandler
 from devops_platform.application.projects.handler import RegisterProjectHandler
-from devops_platform.application.resource_catalog.catalog import ApprovedPostgresCatalog
-from devops_platform.application.workload_delivery.shared.ports import ResourceProvisioner
-from identity.domain.interfaces.project_access_directory import ProjectAccessDirectory
+from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
+from devops_platform.application.software_delivery.shared.ports import ResourceProvisioner
+from devops_platform.domain.interfaces.project_access_directory import ProjectAccessDirectory
+from identity.application.interfaces.browser_transactions import BrowserTransaction
+from identity.application.interfaces.project_access_bridge import ProjectAccessBridge
+from identity.infra.composition.browser_transactions import SqlAlchemyIdentityTransaction
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
 
 
 class CrossContextIntegrationProvider(Provider):
     """Bind adapters that coordinate identity and developer-platform capabilities."""
+
+    @provide(scope=Scope.APP)
+    def project_access_bridge(self) -> ProjectAccessBridge:
+        return ProjectAccessApplicationBridge()
+
+    @provide(scope=Scope.REQUEST, provides=BrowserTransaction)
+    def browser_transaction(
+        self, sessions: async_sessionmaker[AsyncSession]
+    ) -> SqlAlchemyIdentityTransaction:
+        return SqlAlchemyIdentityTransaction(sessions, identity_repository_for_session)
 
     @provide(scope=Scope.APP)
     def application_resources(

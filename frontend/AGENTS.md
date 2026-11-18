@@ -1,31 +1,41 @@
+
 # Frontend
 
-Stack: Next.js 16, React 19, TypeScript.
+Current stack: Next.js, React and TypeScript.
 
 ## Structure
 
-src/
-├── app/             # Routes, layouts, API proxy
-├── features/        # Feature-owned components and state
-├── components/ui/   # Shared visual primitives
-└── lib/             # Transport and technical utilities
+frontend/src/
+├── app/             # Routes, layouts and API integration
+├── features/        # Feature-owned UI and state
+├── components/      # Reusable UI elements
+└── lib/             # Shared technical utilities
 
-## Architecture
+Follow existing conventions where useful.
+Restructure when an agreed design warrants it.
 
-- Backend is authoritative for business rules and access.
-- Keep feature code inside its owning feature.
-- Pages compose features; do not duplicate business logic.
-- Prefer Server Components unless interaction requires client code.
-- Preserve the same-origin API proxy and session contracts.
-- Follow installed Next.js documentation when APIs are uncertain.
+## Engineering Guidelines
 
-## Invariants
+- Design around user goals and observable workflows.
+- Keep components cohesive and responsibilities clear.
+- Avoid duplicated state and unnecessary abstractions.
+- Separate UI concerns from backend business logic.
+- Choose server/client boundaries based on requirements.
+- Reuse existing patterns when appropriate.
+- Introduce libraries only when they add clear value.
+- Evaluate accessibility, responsiveness and error handling.
 
-- Handle loading, empty, error and permission-denied states.
-- Prevent stale responses after session/project changes.
-- Preserve CSRF, cookie and authorization behavior.
-- Never persist revealed credentials in browser storage.
-- Do not add dependencies without a concrete requirement.
+## Architecture Evolution
+
+Existing components and routes are not permanent constraints.
+
+When redesigning:
+
+- Investigate current user flows and dependencies.
+- Identify usability and architectural problems.
+- Propose improvements based on product requirements.
+- Preserve useful behavior without retaining poor structure.
+- Identify and coordinate intentional API changes.
 
 ## Verification
 
@@ -34,5 +44,5 @@ From frontend/:
 npm run typecheck
 npm run build
 
-Test affected user flows when possible.
-A successful build does not prove runtime behavior.
+Verify affected user interactions when possible.
+Distinguish build success from runtime verification.

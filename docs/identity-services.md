@@ -1,16 +1,15 @@
 # Identity services
 
-Identity owns internal accounts, credentials, sessions, API tokens and project
-membership. Developer Platform owns projects and requested resources; Identity
-references project IDs. OPA evaluates Identity permissions and the HTTP boundary
-enforces its answer before application dispatch.
+Identity owns accounts, credentials, sessions, and API tokens. DeveloperPlatform
+owns projects and membership persistence. Existing member routes still use
+Identity for browser authorization and share the transaction with project access.
 
 ## Application actions
 
 | Capability | Action folders | Entry point |
 | --- | --- | --- |
-| Sign in and out | `login`, `logout`, `logout_all_sessions` | Existing `/api/v1/auth` routes through `IdentityModule` |
-| Sessions | `authenticate_session`, `rotate_csrf`, `list_sessions`, `revoke_session`, `select_active_project` | Existing browser/session routes; authentication also refreshes session activity |
+| Sign in and out | `login`, `logout`, `authenticate_session` | Existing `/api/v1/auth` routes through `IdentityModule`; authentication refreshes session activity |
+| Sessions | `rotate_csrf`, `list_sessions`, `revoke_session`, `revoke_all_sessions`, `select_active_project` | Existing browser/session routes |
 | Password changes | `change_password` | `/api/v1/me/password` |
 | Membership | `list_project_members`, `manage_project_membership` | Existing project-member routes; trusted actor and session-based membership changes share one action folder |
 | User administration | `create_user`, `set_user_status`, `bootstrap_first_admin`, `start_password_setup`, `complete_password_setup` | Existing internal host operations; no new global user-admin HTTP API |
@@ -30,18 +29,26 @@ a session secret; it does not issue a project-scoped automation token.
   and authenticated session facts have explicit names in `domain/records.py`.
 - `UserRepository`, `SessionRepository` and `ProjectMembershipRepository` describe
   required domain persistence capabilities. `SQLAlchemyIdentityRepository` implements
-  them using one host-owned SQLAlchemy session. Hosts retain the existing transaction
-  and lock order; the adapter and handlers do not commit.
+  them using a transaction-scoped SQLAlchemy session. Application handlers choose
+  the transaction phases; the persistence adapter opens and completes each one.
 
-Infrastructure is grouped under `persistence`, `security`, `authorization`, `hosts`
-and `composition`. Transaction hosts and module-to-host adapters live in `hosts`;
-composition contains DI providers and dispatch registration. Repository contracts
-live in `domain/interfaces`, including API-token and project-access contracts.
+Infrastructure is grouped under `persistence`, `security`, `authorization`
+and `composition`. Dishka dispatch resolves application handlers directly.
+Application ports live in `application/interfaces`; repository contracts live in
+`domain/interfaces`, including API-token and project-access contracts.
+Application use cases are grouped under `authentication`, `accounts`,
+`sessions`, and `api_tokens`, with compatibility entry points under `project_access`.
+Each use case keeps its message and handler in
+separate files, with a result file where needed.
 
 Sessions retain a 30-minute idle limit and an eight-hour absolute limit. Password
 setup lasts one hour. Existing automation tokens expire after 1–720 hours. Existing
 username throttling locks known accounts after six failures within fifteen minutes
 for fifteen minutes. No new schema migration is required by these changes.
+
+Browser login issues a signed JWT in the existing session cookie. The database
+session remains authoritative for idle expiry, revocation, and credential version.
+Users with an opaque session cookie from an earlier version must sign in again.
 
 ## OPA contract and operation
 

@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from identity.application.authorization.models import AuthorizationDecision, AuthorizationRequest
-from identity.application.authorization.port import AuthorizationUnavailable
+from identity.application.interfaces.authorization import AuthorizationUnavailable
 
 
 class OpaAuthorizationClient:

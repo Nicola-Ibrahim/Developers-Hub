@@ -3,8 +3,8 @@
 import asyncio
 from uuid import uuid4
 
-from devops_platform.application.resource_catalog.handler import ReadCatalogQueryHandler
-from devops_platform.application.resource_catalog.query import ReadCatalog
+from devops_platform.application.resource_management.catalog.handler import ReadCatalogQueryHandler
+from devops_platform.application.resource_management.catalog.query import ReadCatalog
 from devops_platform.application.shared.dto import AccessContext
 
 

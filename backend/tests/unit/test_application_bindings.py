@@ -6,18 +6,18 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from devops_platform.application.application_delivery.shared.ports import (
-    ApplicationDeliveryFailure,
-)
-from devops_platform.application.resource_lifecycle.ports import DatabaseCredentials
 from psycopg.conninfo import conninfo_to_dict
 from sqlalchemy import Select
 
-from devops_platform.infra.persistence.application_bindings import (
+from devops_platform.application.resource_management.ports import DatabaseCredentials
+from devops_platform.application.software_delivery.shared.ports import (
+    ApplicationDeliveryFailure,
+)
+from devops_platform.infra.composition.application_bindings import (
     SQLAlchemyApplicationDatabaseBindings,
 )
-from devops_platform.infra.persistence.delivery import ApplicationRow
-from devops_platform.infra.persistence.models import Resource, ResourceSecret
+from devops_platform.infra.persistence.models.delivery import ApplicationRow
+from devops_platform.infra.persistence.models.resources import Resource, ResourceSecret
 from devops_platform.infra.providers.application_runtime import managed_resource_container_name
 
 

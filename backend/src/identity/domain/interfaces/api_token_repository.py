@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from identity.domain.credentials import ApiTokenAuthenticationDetails
+from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.domain.records import ApiTokenAuditEvent, ApiTokenStatus, ProjectMembershipStatus
 
 

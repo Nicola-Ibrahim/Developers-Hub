@@ -44,10 +44,5 @@ class ScryptPasswordHasher:
             return False
 
 
-class OpaqueSecretGenerator:
-    def generate(self) -> str:
-        return secrets.token_urlsafe(32)
-
-
 def secret_digest(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()

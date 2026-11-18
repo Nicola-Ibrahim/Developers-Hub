@@ -4,15 +4,28 @@ from uuid import uuid4
 import pytest
 
 from devops_platform.domain.aggregates.resource_lifecycle import ResourceLifecycle
-from devops_platform.domain.errors import DomainError
+from devops_platform.domain.entities.project_membership import ProjectMembership
+from devops_platform.domain.errors import DomainError, InvalidProjectRole
 from devops_platform.domain.services.resource_admission import (
     CapacitySnapshot,
     ResourceAdmissionPolicy,
 )
+from devops_platform.domain.value_objects.project_role import ProjectRole
 from devops_platform.domain.value_objects.resource_name import ResourceName
 from devops_platform.domain.value_objects.resource_spec import ResourceSpec
 from devops_platform.domain.value_objects.revision import ResourceRevision
 from devops_platform.domain.value_objects.statuses import DesiredState, ResourceStatus
+
+
+def test_membership_role_change_preserves_identity_and_validates_role() -> None:
+    membership = ProjectMembership(uuid4(), uuid4(), ProjectRole.parse("developer"))
+    updated = membership.change_role("admin")
+    assert (updated.user_id, updated.project_id) == (membership.user_id, membership.project_id)
+    assert updated.role.value == "admin"
+    assert membership.role.value == "developer"
+
+    with pytest.raises(InvalidProjectRole):
+        membership.change_role("owner")
 
 
 def _resource(now: datetime) -> ResourceLifecycle:

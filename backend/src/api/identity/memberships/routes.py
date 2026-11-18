@@ -12,9 +12,11 @@ from api.identity.authentication.credentials import (
     require_cookie_session,
 )
 from api.identity.memberships.schemas import MembershipBody
-from identity.application.list_project_members.query import ListProjectMembersQuery
-from identity.application.manage_project_membership.command import ManageProjectMembershipCommand
-from identity.application.module import IdentityModule
+from identity.application.interfaces.dispatch import IdentityModule
+from identity.application.project_access.list_project_members.query import ListProjectMembersQuery
+from identity.application.project_access.manage_project_membership.command import (
+    ManageProjectMembershipCommand,
+)
 
 router = APIRouter()
 

@@ -10,28 +10,30 @@ from pydantic import ValidationError
 
 from api.platform.application_delivery.schemas import LocalPreviewCreate
 from devops_platform.application.shared.errors import PlatformRequestError
-from devops_platform.application.workload_delivery.attach_database.command import (
+from devops_platform.application.software_delivery.attach_database.command import (
     ResourceAttachmentSpec,
 )
-from devops_platform.application.workload_delivery.create_local_preview.command import (
+from devops_platform.application.software_delivery.create_local_preview.command import (
     CreateLocalPreview,
     LocalPreviewRegistration,
 )
-from devops_platform.application.workload_delivery.create_local_preview.handler import (
+from devops_platform.application.software_delivery.create_local_preview.handler import (
     CreateLocalPreviewHandler,
 )
-from devops_platform.application.workload_delivery.deploy_workload.command import (
+from devops_platform.application.software_delivery.deploy_application.command import (
     DeployApplication,
     DeploymentSpec,
 )
-from devops_platform.application.workload_delivery.deploy_workload.handler import (
+from devops_platform.application.software_delivery.deploy_application.handler import (
     DeployApplicationHandler,
 )
 from devops_platform.authorization import authorize_platform_access, authorize_platform_action
-from devops_platform.domain.access import AccessContext
 from devops_platform.domain.errors import DomainError
+from devops_platform.domain.value_objects.access_context import AccessContext
 from devops_platform.domain.value_objects.image_digest import ImageDigest
-from devops_platform.infra.persistence.delivery import SQLAlchemyApplicationDeliveryRepository
+from devops_platform.infra.persistence.repositories.delivery import (
+    SQLAlchemyApplicationDeliveryRepository,
+)
 
 
 class FakeFingerprint:

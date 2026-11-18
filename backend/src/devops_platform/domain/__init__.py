@@ -1,12 +1,12 @@
 """Pure domain rules for resource lifecycle and lease policy."""
 
+from devops_platform.domain.aggregates.resource_lifecycle import transition_status
 from devops_platform.domain.errors import DomainError, LeaseViolation, TransitionViolation
-from devops_platform.domain.leases import LeasePolicy
-from devops_platform.domain.resources import (
+from devops_platform.domain.value_objects.lease import LeasePolicy
+from devops_platform.domain.value_objects.statuses import (
     DeletionReason,
     DesiredState,
     ResourceStatus,
-    transition_status,
 )
 
 __all__ = [

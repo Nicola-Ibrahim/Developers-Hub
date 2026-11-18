@@ -13,15 +13,23 @@ from api.app import create_app
 from api.platform.resources.schemas import RenewRequest, ResourceRequest, ResourceView
 from api.settings.config import APISettings, get_api_settings
 from devops_platform.application.module import DeveloperPlatformModule
-from devops_platform.application.resource_catalog.handler import ReadCatalogQueryHandler
-from devops_platform.application.resource_catalog.query import ReadCatalog
-from identity.application.authenticate_api_token.handler import AuthenticateApiTokenHandler
-from identity.application.authenticate_api_token.query import AuthenticateApiTokenQuery
-from identity.application.module import IdentityModule
-from identity.domain.credentials import ApiTokenAuthenticationDetails
+from devops_platform.application.resource_management.catalog.handler import ReadCatalogQueryHandler
+from devops_platform.application.resource_management.catalog.query import ReadCatalog
+from identity.application.api_tokens.authenticate_api_token.handler import (
+    AuthenticateApiTokenHandler,
+)
+from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
+from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
+from identity.application.interfaces.dispatch import IdentityModule
+from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.infra.security.tokens import token_digest
 from shared.infra.readiness import ReadinessProbe
 from shared.infra.settings import Settings
+
+
+class RejectBrowserSessionTokens:
+    def verify(self, token: str) -> bool:
+        return False
 
 
 def settings():
@@ -237,6 +245,10 @@ def test_http_transport_works_with_fake_application_ports():
         def digest(self, token):
             return "synthetic-digest"
 
+    class Transaction:
+        async def run(self, action):
+            return await action(Reader())
+
     class Ready:
         async def inspect(self):
             return "ready"
@@ -244,7 +256,7 @@ def test_http_transport_works_with_fake_application_ports():
     class FakeIdentityQuery:
         async def query(self, message):
             assert isinstance(message, AuthenticateApiTokenQuery)
-            return await AuthenticateApiTokenHandler(Reader(), Hasher(), lambda: now).execute(
+            return await AuthenticateApiTokenHandler(Transaction(), Hasher(), lambda: now).execute(
                 AuthenticateApiTokenQuery(message.token)
             )
 
@@ -265,6 +277,10 @@ def test_http_transport_works_with_fake_application_ports():
         @provide(scope=Scope.APP)
         def readiness(self) -> ReadinessProbe:
             return Ready()
+
+        @provide(scope=Scope.APP)
+        def session_tokens(self) -> BrowserSessionTokenVerifier:
+            return RejectBrowserSessionTokens()
 
     container = make_async_container(FakeCapabilities(), FastapiProvider())
     with TestClient(create_app(container=container)) as client:

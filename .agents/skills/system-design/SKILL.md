@@ -1,46 +1,42 @@
 ---
 name: system-design
-description: Investigate or change Developers-Hub business concepts, bounded-context ownership, or cross-capability contracts.
+description: Analyze architectural boundaries, domain models, system interactions, and substantial design changes.
 ---
 
-# Domain and architecture discovery
+# System Design
 
-Use for a substantial change where ownership of a concept,
-invariant or API across capabilities is uncertain.
-Not needed for ordinary implementation.
+## Procedure
 
-1. Identify the developer/operator outcome first;
-   explain who performs it and why.
+1. Understand the business problem and desired outcome.
 
-2. Trace one existing end-to-end workflow and compare
-   observed code with the proposed product model.
+2. Investigate the current implementation and relevant constraints.
 
-3. Define the smallest consistent vocabulary:
-   - Project: team workspace
-   - Application: independently deployable unit
-   - Environment: logical deployment destination
-   - Deployment: release of an artifact
-   - Resource: managed infrastructure
+3. Identify:
+   - Business capabilities and domain concepts
+   - Ownership and responsibilities
+   - Consistency and lifecycle boundaries
+   - Dependencies and external interactions
+   - Existing design problems and unnecessary complexity
 
-4. Name one owner for each invariant, state transition,
-   transaction and external effect.
+4. Compare reasonable alternatives using:
+   - Correctness
+   - Cohesion and coupling
+   - Maintainability
+   - Scalability where required
+   - Operational complexity
 
-5. Distinguish business subdomains from implemented
-   bounded contexts. Default to the existing
-   Identity and DeveloperPlatform contexts.
+5. Recommend the simplest design that satisfies the requirements.
 
-6. Propose the minimum changes and integration sequence.
-   Show a short diagram or table only when it helps.
+6. Define clear boundaries, contracts, and an incremental
+   implementation approach when needed.
 
-7. Return decisions, trade-offs, unknowns and observable
-   acceptance criteria to the coordinator.
+## Principles
 
-Do not create extensive plans or additional bounded
-contexts by default.
-
-The live conversation owns the current design decision.
-
-Write a durable decision note only when requested or
-when the decision must survive another work session.
-
-Investigation alone does not authorize implementation.
+- Do not treat existing architecture as automatically correct.
+- Do not introduce bounded contexts, aggregates, services,
+  or interfaces without justified responsibilities.
+- Distinguish business concepts from implementation details.
+- Avoid speculative abstractions and premature optimization.
+- Prefer concise diagrams and explanations.
+- Keep decisions in the current conversation unless durable
+  documentation is necessary.

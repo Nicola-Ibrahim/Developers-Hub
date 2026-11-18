@@ -4,13 +4,13 @@ import logging
 from uuid import UUID
 
 from api.core.errors import APIError
-from identity.application.authenticate_session.query import AuthenticateSessionQuery
+from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
 from identity.application.authorization.models import AuthorizationRequest
-from identity.application.authorization.port import (
+from identity.application.interfaces.authorization import (
     AuthorizationDecisionPort,
     AuthorizationUnavailable,
 )
-from identity.application.module import IdentityModule
+from identity.application.interfaces.dispatch import IdentityModule
 
 logger = logging.getLogger(__name__)
 

@@ -5,19 +5,19 @@ import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from composition.container import BackendContainer
-from devops_platform.application.database_lifecycle.read_activity.handler import (
+from devops_platform.application.resource_management.read_activity.handler import (
     ListResourceActivityQueryHandler,
 )
-from devops_platform.application.database_lifecycle.read_connection.handler import (
+from devops_platform.application.resource_management.read_connection.handler import (
     GetDatabaseConnectionQueryHandler,
 )
-from devops_platform.application.database_lifecycle.renew_lease.handler import (
-    RenewDatabaseLeaseHandler,
-)
-from devops_platform.application.database_provisioning.read_resources.handler import (
+from devops_platform.application.resource_management.read_resources.handler import (
     ReadResourcesHandler,
 )
-from devops_platform.application.database_provisioning.submit_database_request.handler import (
+from devops_platform.application.resource_management.renew_lease.handler import (
+    RenewDatabaseLeaseHandler,
+)
+from devops_platform.application.resource_management.submit_database_request.handler import (
     RequestTemporaryDatabaseHandler,
 )
 from devops_platform.application.shared.resource_repository import ResourceRepository
@@ -29,9 +29,7 @@ from shared.infra.settings import Settings
 def test_every_platform_message_is_registered_once() -> None:
     registered = set(PLATFORM_HANDLER_REGISTRY.commands) | set(PLATFORM_HANDLER_REGISTRY.queries)
     assert set(ACTION_PERMISSIONS) == registered
-    assert all(
-        message.__module__ != "devops_platform.application.module" for message in registered
-    )
+    assert all(message.__module__ != "devops_platform.application.module" for message in registered)
 
 
 def test_every_platform_handler_resolves_in_operation_scope_without_database_io() -> None:

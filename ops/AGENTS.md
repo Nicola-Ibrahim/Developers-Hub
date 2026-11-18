@@ -1,44 +1,56 @@
+
 # Infrastructure and Delivery
 
 ## Structure
 
-- ops/local/ansible/: local bootstrap
-- ops/hosting/: host configuration and Terraform
-- ../compose.yaml: container orchestration
-- ../scripts/dev.sh: local platform commands
-- ../.github/workflows/: CI/CD
+ops/ contains infrastructure definitions,
+environment configuration and operational tooling.
 
-## Ownership
+Current tools include Terraform, Ansible, Docker
+and CI/CD workflows.
 
-- Terraform: infrastructure provisioning
-- Ansible: host configuration
-- CI/CD: build, publish and release workflow
-- Docker/Compose: container runtime
-- Platform workers: resource and application lifecycle
+Their organization may evolve as platform
+provisioning capabilities develop.
 
-Do not move domain business logic into infrastructure tools.
+## Responsibilities
+
+Distinguish infrastructure used to operate
+Developers-Hub from infrastructure provisioned
+for developers through the platform.
+
+DeveloperPlatform owns the business lifecycle
+of developer-requested resources.
+
+Infrastructure tooling implements the mechanisms
+required to provision and manage those resources.
+
+Avoid placing business decisions inside deployment
+scripts or infrastructure definitions.
+
+## Engineering Guidelines
+
+- Select tools according to actual operational requirements.
+- Consider reliability, security, cost and maintainability.
+- Prefer reproducible and observable automation.
+- Avoid duplicate configuration and unnecessary tooling.
+- Evaluate state management, permissions and recovery.
+- Consider infrastructure lifecycle and cleanup.
+- Do not assume current hosting design is final.
 
 ## Execution
 
-Choose execution mode based on the task.
-Direct Python, Docker and Compose are not interchangeable,
-and none should be forced unnecessarily.
+Use the execution method appropriate to the task.
 
-Local commands from repository root:
+Direct application execution, containers,
+infrastructure provisioning and deployment
+serve different purposes.
 
-scripts/dev.sh help
-scripts/dev.sh status
-scripts/dev.sh up
-scripts/dev.sh down
-
-Resource/application worker profiles are optional.
-Inspect the script before using additional options.
+Do not require a specific tool unless necessary.
 
 ## Safety
 
-- No secrets in code, logs, plans or build artifacts.
-- Use immutable image identities for releases.
-- Publishing an image is not deploying it.
-- Verify readiness separately from container startup.
-- Preserve ownership labels, state and rollback behavior.
-- Do not provision or destroy live resources without approval.
+- Protect credentials and infrastructure state.
+- Verify target environments before live operations.
+- Do not perform destructive operations without approval.
+- Distinguish validation from successful deployment.
+- Report actual verification and remaining risks.

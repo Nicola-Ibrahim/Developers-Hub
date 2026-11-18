@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from devops_platform.application.database_provisioning.read_resources.query import (
+from devops_platform.application.resource_management.read_resources.query import (
     OperationDetails,
     ResourceDetails,
 )

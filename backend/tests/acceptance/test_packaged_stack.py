@@ -222,7 +222,10 @@ import asyncio, json
 from pathlib import Path
 from composition.container import BackendContainer
 from composition.integrations.project_registration import RegisterProjectCommandHandler
-from identity.infra.hosts.identity_sessions import BrowserIdentityService
+from identity.application.accounts.bootstrap_first_admin.command import BootstrapFirstAdminCommand
+from identity.application.accounts.bootstrap_first_admin.handler import BootstrapFirstAdminHandler
+from identity.application.accounts.create_user.command import CreateUserCommand
+from identity.application.accounts.create_user.handler import CreateUserHandler
 from devops_platform.application.projects.command import RegisterProjectCommand
 from shared.infra.settings import Settings
 
@@ -236,12 +239,13 @@ async def seed():
             project = await registration.execute(
                 RegisterProjectCommand("demo", "platform", "example/demo", ("dev",))
             )
-            identity = await scope.get(BrowserIdentityService)
+            create_user = await scope.get(CreateUserHandler)
+            bootstrap = await scope.get(BootstrapFirstAdminHandler)
             password = (
                 Path("/run/platform-secrets/acceptance_password").read_text().strip()
             )
-            user_id = await identity.create_user("demo", password)
-            await identity.bootstrap_first_project_admin(user_id, project.project_id)
+            user_id = await create_user.execute(CreateUserCommand("demo", password))
+            await bootstrap.execute(BootstrapFirstAdminCommand(user_id, project.project_id))
         print(
             json.dumps({"project_id": str(project.project_id), "user_id": str(user_id)})
         )
@@ -270,12 +274,12 @@ asyncio.run(seed())
 import asyncio, secrets
 from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
-from devops_platform.application.database_lifecycle.ports import (
+from devops_platform.application.resource_management.ports import (
     DatabaseCredentials,
     ProvisioningJob,
 )
 from devops_platform.infra.providers.docker_postgres import DockerPostgresProvider
-from devops_platform.infra.persistence.models import QuotaBudget
+from devops_platform.infra.persistence.models.resources import QuotaBudget
 from shared.infra.settings import Settings
 from shared.infra.persistence.database import create_async_database_engine
 

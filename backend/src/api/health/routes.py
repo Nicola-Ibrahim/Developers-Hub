@@ -5,7 +5,7 @@ from fastapi import APIRouter
 
 from api.core.errors import APIError
 from identity.application.authorization.models import AuthorizationRequest
-from identity.application.authorization.port import (
+from identity.application.interfaces.authorization import (
     AuthorizationDecisionPort,
     AuthorizationUnavailable,
 )

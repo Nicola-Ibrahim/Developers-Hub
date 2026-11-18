@@ -5,11 +5,10 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from devops_platform.application.application_delivery.shared.ports import (
+from devops_platform.application.software_delivery.shared.ports import (
     DeliveryClaim,
     DeliveryResult,
 )
-
 from devops_platform.infra.workers.application_host import ApplicationDeliveryHost
 
 

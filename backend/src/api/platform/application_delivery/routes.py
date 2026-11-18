@@ -20,37 +20,37 @@ from api.platform.application_delivery.schemas import (
     TemplateView,
     WebhookResponse,
 )
-from devops_platform.application.module import DeveloperPlatformModule
-from devops_platform.application.shared.dto import AccessContext
-from devops_platform.application.workload_delivery.attach_database.command import (
-    AttachDatabase,
-    ResourceAttachmentSpec,
-)
-from devops_platform.application.workload_delivery.create_local_preview.command import (
-    CreateLocalPreview,
-    LocalPreviewRegistration,
-)
-from devops_platform.application.workload_delivery.create_workload.command import (
+from devops_platform.application.applications.create_application.command import (
     ApplicationRegistration,
     CreateApplication,
 )
-from devops_platform.application.workload_delivery.deploy_workload.command import (
-    DeployApplication,
-    DeploymentSpec,
-)
-from devops_platform.application.workload_delivery.handle_preview_webhook.command import (
-    ProcessGithubPreviewWebhook,
-)
-from devops_platform.application.workload_delivery.read_templates.query import ReadTemplates
-from devops_platform.application.workload_delivery.read_workloads.query import (
+from devops_platform.application.applications.read_applications.query import (
     ReadApplication,
     ReadApplications,
     ReadDeploymentHistory,
 )
-from devops_platform.application.workload_delivery.retry_delivery_step.command import (
+from devops_platform.application.applications.read_templates.query import ReadTemplates
+from devops_platform.application.module import DeveloperPlatformModule
+from devops_platform.application.shared.dto import AccessContext
+from devops_platform.application.software_delivery.attach_database.command import (
+    AttachDatabase,
+    ResourceAttachmentSpec,
+)
+from devops_platform.application.software_delivery.create_local_preview.command import (
+    CreateLocalPreview,
+    LocalPreviewRegistration,
+)
+from devops_platform.application.software_delivery.deploy_application.command import (
+    DeployApplication,
+    DeploymentSpec,
+)
+from devops_platform.application.software_delivery.handle_preview_webhook.command import (
+    ProcessGithubPreviewWebhook,
+)
+from devops_platform.application.software_delivery.retry_delivery_step.command import (
     RetryDeliveryStep,
 )
-from devops_platform.application.workload_delivery.shared.models import (
+from devops_platform.application.software_delivery.shared.models import (
     ApplicationDetails,
     DeliveryStepDetails,
     DeploymentDetails,

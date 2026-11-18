@@ -1,35 +1,8 @@
 """Application rules and DTO construction for internal browser identity."""
 
-from datetime import datetime
 from uuid import UUID
 
-from identity.domain.browser_credentials import (
-    normalize_user_name,
-    session_expiry,
-    validate_password,
-)
-from identity.domain.errors import AuthenticationRejected
 from identity.domain.records import MembershipDetails, SessionPrincipal
-
-
-class BrowserIdentity:
-    """Small use-case policy surface; persistence and transaction completion are ports/host work."""
-
-    @staticmethod
-    def login_name(value: str) -> str:
-        return normalize_user_name(value)
-
-    @staticmethod
-    def password(value: str) -> None:
-        validate_password(value)
-
-    @staticmethod
-    def expiry(now: datetime) -> tuple[datetime, datetime]:
-        return session_expiry(now)
-
-    @staticmethod
-    def reject_login() -> None:
-        raise AuthenticationRejected()
 
 
 def principal_for_project(

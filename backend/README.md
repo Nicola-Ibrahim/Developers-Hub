@@ -210,8 +210,8 @@ A fresh installation therefore needs a separately authorized bootstrap integrati
 guest dashboard access does not create an account or grant project permissions.
 
 `RegisterProjectCommandHandler` retains atomic project/environment registration and
-project quotas. `BrowserIdentityService` retains internal account and first-project-
-administrator setup. Existing user-facing identity endpoints remain protected.
+project quotas. Identity application handlers provide internal account creation
+and first project administrator setup. Existing user-facing identity endpoints remain protected.
 Missing target quotas continue to fail closed; do not write arbitrary quotas to
 bypass provider verification.
 

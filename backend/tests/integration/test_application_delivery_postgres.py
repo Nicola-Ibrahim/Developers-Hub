@@ -5,26 +5,29 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from devops_platform.application.application_delivery.create_application.command import (
-    ApplicationRegistration,
-)
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for
 
+from devops_platform.application.applications.create_application.command import (
+    ApplicationRegistration,
+)
 from devops_platform.application.shared.dto import AccessContext
-from devops_platform.infra.persistence.delivery import (
+from devops_platform.infra.persistence.models.delivery import (
     ApplicationDeliveryIdempotencyRow,
     ApplicationDeliveryStepRow,
     ApplicationRow,
-    SQLAlchemyApplicationDeliveryRepository,
 )
-from devops_platform.infra.persistence.models import (
+from devops_platform.infra.persistence.models.project import (
     ProjectEnvironmentRow,
     ProjectRegistrationRow,
 )
-from identity.infra.persistence.models import InternalUserRow, ProjectRow, TeamRow
+from devops_platform.infra.persistence.models.project_access import ProjectRow, TeamRow
+from devops_platform.infra.persistence.repositories.delivery import (
+    SQLAlchemyApplicationDeliveryRepository,
+)
+from identity.infra.persistence.models.user import InternalUserRow
 
 pytestmark = pytest.mark.postgres
 
@@ -112,9 +115,8 @@ def test_duplicate_creation_and_expired_worker_claim_recover(postgres_engine) ->
 def test_preview_close_waits_for_claimed_resource_and_carries_late_resource_id(
     postgres_engine,
 ) -> None:
-    from devops_platform.application.application_delivery.shared.ports import DeliveryResult
-
-    from devops_platform.infra.persistence.models import Resource
+    from devops_platform.application.software_delivery.shared.ports import DeliveryResult
+    from devops_platform.infra.persistence.models.resources import Resource
 
     user_id, project_id, team_id, environment_id = uuid4(), uuid4(), uuid4(), uuid4()
     now = datetime.now(UTC)
@@ -377,7 +379,7 @@ def test_reopened_preview_reuses_cleanup_and_keeps_failed_deployment_removal_int
 ):
     from test_resource_worker_postgres import seed_resource
 
-    from devops_platform.infra.persistence.models import Resource
+    from devops_platform.infra.persistence.models.resources import Resource
 
     _, resource_id, _, _ = seed_resource(postgres_engine)
     app_id, cleanup_id = uuid4(), uuid4()

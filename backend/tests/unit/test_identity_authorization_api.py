@@ -11,17 +11,19 @@ from fastapi.testclient import TestClient
 
 from api.app import create_app
 from api.settings.config import BrowserCookiePolicy
-from identity.application.authenticate_session.query import AuthenticateSessionQuery
+from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
+from identity.application.authentication.login.command import LoginCommand
+from identity.application.authentication.login.result import LoginResult
+from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authorization.models import AuthorizationDecision
-from identity.application.authorization.port import (
+from identity.application.interfaces.authorization import (
     AuthorizationDecisionPort,
     AuthorizationUnavailable,
 )
-from identity.application.login.command import LoginCommand
-from identity.application.login.result import LoginResult
-from identity.application.logout.command import LogoutCommand
-from identity.application.module import IdentityModule
+from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
+from identity.application.interfaces.dispatch import IdentityModule
 from identity.domain.records import SessionPrincipal
+from identity.infra.security.browser_tokens import JwtBrowserSessionTokens
 
 USER, PROJECT, SESSION = uuid4(), uuid4(), uuid4()
 
@@ -62,11 +64,17 @@ class Policy:
         return AuthorizationDecision(self.allowed, "identity-v1")
 
 
+class FakeSessionTokenVerifier:
+    def verify(self, token: str) -> bool:
+        return token == "private-session"
+
+
 class Bindings(Provider):
-    def __init__(self, identity, policy):
+    def __init__(self, identity, policy, session_token_verifier=None):
         super().__init__()
         self.identity = identity
         self.policy = policy
+        self.session_token_verifier = session_token_verifier or FakeSessionTokenVerifier()
 
     @provide(scope=Scope.REQUEST)
     def module(self) -> IdentityModule:
@@ -79,6 +87,10 @@ class Bindings(Provider):
     @provide(scope=Scope.APP)
     def cookies(self) -> BrowserCookiePolicy:
         return BrowserCookiePolicy(False)
+
+    @provide(scope=Scope.APP)
+    def session_tokens(self) -> BrowserSessionTokenVerifier:
+        return self.session_token_verifier
 
 
 CASES = [
@@ -157,6 +169,23 @@ def test_allowed_logout_dispatches_after_policy_check():
         assert len(identity.commands) == 1
         assert isinstance(identity.commands[0], LogoutCommand)
         assert len(policy.calls) == 1
+    finally:
+        asyncio.run(container.close())
+
+
+@pytest.mark.parametrize("cookie", ["malformed.cookie.value", "a.b.c"])
+def test_malformed_browser_cookie_is_rejected_before_identity_or_policy(cookie):
+    identity, policy = Identity(), Policy(allowed=True)
+    verifier = JwtBrowserSessionTokens("test-signing-material-" * 3)
+    container = make_async_container(Bindings(identity, policy, verifier), FastapiProvider())
+    try:
+        with TestClient(create_app(container=container)) as client:
+            client.cookies.set("devops_session", cookie)
+            response = client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": "csrf"})
+        assert response.status_code == 401
+        assert not identity.commands
+        assert not identity.queries
+        assert not policy.calls
     finally:
         asyncio.run(container.close())
 

@@ -6,15 +6,20 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Depends, Request
 
 from api.core.errors import APIError
-from api.identity.authentication.credentials import browser_credentials, require_cookie_session
+from api.identity.authentication.credentials import (
+    browser_credentials,
+    require_cookie_session,
+    require_valid_browser_session,
+)
 from api.identity.authentication.routes import router as authentication_router
 from api.identity.authentication.schemas import ProjectBody
 from api.identity.authorization import require_identity_permission
 from api.identity.memberships.routes import router as memberships_router
 from api.identity.principal.routes import router as principal_router
 from api.identity.sessions.routes import router as sessions_router
-from identity.application.authorization.port import AuthorizationDecisionPort
-from identity.application.module import IdentityModule
+from identity.application.interfaces.authorization import AuthorizationDecisionPort
+from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
+from identity.application.interfaces.dispatch import IdentityModule
 
 _IDENTITY_ACTIONS = {
     "browser_me": "identity.sessions.read",
@@ -35,10 +40,13 @@ async def identity_route_permission(
     request: Request,
     module: FromDishka[IdentityModule],
     authorizer: FromDishka[AuthorizationDecisionPort],
+    session_tokens: FromDishka[BrowserSessionTokenVerifier],
 ) -> None:
     route_name = request.scope["route"].name
     if route_name == "login":
         return
+    credentials = browser_credentials(request)
+    require_valid_browser_session(credentials, session_tokens)
     action = _IDENTITY_ACTIONS.get(route_name)
     if action is None:
         raise APIError(403, "forbidden", "Permission denied")
@@ -63,7 +71,7 @@ async def identity_route_permission(
     await require_identity_permission(
         module=module,
         authorizer=authorizer,
-        session_token=require_cookie_session(browser_credentials(request)),
+        session_token=require_cookie_session(credentials),
         action=action,
         resource_kind="project_membership"
         if "members" in route_name or "member" in route_name

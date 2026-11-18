@@ -18,15 +18,15 @@ from sqlalchemy.pool import NullPool
 
 from api.app import create_app
 from composition.container import BackendContainer
-from identity.application.issue_api_token.command import IssueApiTokenCommand
-from identity.application.issue_api_token.result import PreparedApiToken
-from identity.application.module import IdentityModule
+from identity.application.api_tokens.issue_api_token.command import IssueApiTokenCommand
+from identity.application.api_tokens.issue_api_token.result import PreparedApiToken
+from identity.application.interfaces.dispatch import IdentityModule
 from identity.application.shared.errors import IdentityUnavailable
-from identity.application.shared.ports import ApiTokenRepository
-from identity.domain.credentials import ApiTokenAuthenticationDetails
+from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
+from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.records import ApiTokenStatus, ProjectMembershipStatus
-from identity.infra.hosts.api_token_operations import IssueApiTokenToFile
-from identity.infra.persistence.store import SQLAlchemyApiTokenRepository
+from identity.infra.composition.api_token_transactions import IssueApiTokenToFile
+from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
 from identity.infra.security.credential_file import PrivateCredentialFile
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
@@ -468,7 +468,7 @@ def test_http_commit_failure_returns_503_without_success_response_start(monkeypa
     )
     session = FakeSession(fail_commit=SQLAlchemyError("database detail"))
     monkeypatch.setattr(
-        "identity.infra.hosts.api_token_authentication.SQLAlchemyApiTokenRepository",
+        "identity.infra.composition.api_token_transactions.SQLAlchemyApiTokenRepository",
         lambda active: repository,
     )
 

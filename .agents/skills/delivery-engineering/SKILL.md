@@ -1,68 +1,37 @@
 ---
 name: delivery-engineering
-description: Change or verify a Developers-Hub CI pipeline, Docker runtime, infrastructure plan, or deployment/rollback workflow.
+description: Design, implement, refactor, or verify development environments, infrastructure, CI/CD, and deployment workflows.
 ---
 
-# Delivery and infrastructure workflow
-
-Use when changing operational automation or validating
-a deployment path.
+# Delivery Engineering
 
 ## Procedure
 
-1. Identify what the task actually concerns:
-   - Direct Python execution
-   - Docker/container runtime
-   - CI validation
-   - Artifact publishing
-   - Infrastructure provisioning
-   - Application deployment
+1. Identify the intended environment and operational outcome.
 
-2. Do not treat these operations as interchangeable.
+2. Inspect relevant configurations, scripts, pipelines,
+   infrastructure definitions, and dependencies.
 
-3. Follow the execution mode requested by the user
-   unless a genuine dependency requires another mode.
+3. Evaluate:
+   - Correctness and reproducibility
+   - Security and permissions
+   - Reliability and recovery
+   - Duplicate or obsolete automation
+   - Operational complexity
+   - Cost when relevant
 
-   A focused Python unit test does not require Docker.
-   Real Docker-provider acceptance does require Docker.
+4. Choose appropriate tools for the actual requirements.
 
-4. Trace the delivery chain where applicable:
+5. Implement or improve the necessary workflow.
 
-   Source revision
-     -> Tests and build
-     -> Immutable artifact
-     -> Approved deployment target
-     -> Health and readiness
-     -> Rollback or cleanup
+6. Validate each relevant stage using suitable checks.
 
-5. Identify which stages are already implemented
-   and which remain planned.
+## Principles
 
-6. Preserve:
-   - Credential security
-   - Target isolation
-   - Infrastructure state ownership
-   - Least-privilege permissions
-   - Idempotency
-   - Retry and recovery
-   - Resource ownership labels
-
-7. Validate locally or through static checks first.
-
-   Terraform plan is not proof of deployment.
-   Image publishing is not application deployment.
-
-8. Do not apply Terraform, deploy, modify live secrets,
-   destroy resources or run global Docker cleanup
-   without specific authorization.
-
-## Handoff
-
-Report:
-- Exact stage verified
-- Commands and actual results
-- Missing prerequisites
-- Rollback/recovery gaps
-
-Consult ops/AGENTS.md and docs/operations.md
-only for tasks involving those systems.
+- Do not force Docker, Terraform, Kubernetes, or cloud services.
+- Do not assume existing infrastructure design is correct.
+- Separate application behavior from infrastructure mechanisms.
+- Avoid unnecessary tooling and automation layers.
+- Distinguish validation from actual deployment.
+- Never perform destructive or live infrastructure operations
+  without explicit authorization.

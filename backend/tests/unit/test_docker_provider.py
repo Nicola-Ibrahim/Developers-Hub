@@ -8,14 +8,14 @@ from uuid import UUID, uuid4
 
 import docker
 import pytest
-from devops_platform.application.resource_lifecycle.ports import (
+
+import devops_platform.infra.providers.docker_postgres as docker_provider
+from devops_platform.application.resource_management.ports import (
     DatabaseCredentials,
     DatabaseEndpoint,
     ProviderFailure,
     ProvisioningJob,
 )
-
-import devops_platform.infra.providers.docker_postgres as docker_provider
 from devops_platform.infra.providers.docker_postgres import DockerPostgresProvider
 
 

@@ -11,25 +11,28 @@ from uuid import uuid4
 import docker
 import pytest
 from cryptography.fernet import Fernet
-from devops_platform.application.application_delivery.shared.ports import (
-    ApplicationDeliveryFailure,
-)
-from devops_platform.application.resource_lifecycle.ports import (
-    DatabaseCredentials,
-    ProvisioningJob,
-)
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for
 
-from devops_platform.infra.persistence.application_bindings import (
+from devops_platform.application.resource_management.ports import (
+    DatabaseCredentials,
+    ProvisioningJob,
+)
+from devops_platform.application.software_delivery.shared.ports import (
+    ApplicationDeliveryFailure,
+)
+from devops_platform.infra.composition.application_bindings import (
     SQLAlchemyApplicationDatabaseBindings,
 )
-from devops_platform.infra.persistence.delivery import ApplicationRow
-from devops_platform.infra.persistence.models import (
+from devops_platform.infra.persistence.models.delivery import ApplicationRow
+from devops_platform.infra.persistence.models.project import (
     ProjectEnvironmentRow,
     ProjectRegistrationRow,
+)
+from devops_platform.infra.persistence.models.project_access import ProjectRow, TeamRow
+from devops_platform.infra.persistence.models.resources import (
     Resource,
     ResourceSecret,
 )
@@ -39,7 +42,7 @@ from devops_platform.infra.providers.application_runtime import (
 from devops_platform.infra.providers.docker_application import DockerApplicationAdapter
 from devops_platform.infra.providers.docker_postgres import DockerPostgresProvider
 from devops_platform.infra.security.credentials import FernetResourceCredentialCipher
-from identity.infra.persistence.models import InternalUserRow, ProjectRow, TeamRow
+from identity.infra.persistence.models.user import InternalUserRow
 
 pytestmark = pytest.mark.postgres
 

@@ -14,11 +14,13 @@ from api.identity.authentication.credentials import (
 from api.identity.authentication.schemas import LoginBody, ProjectBody
 from api.identity.sessions.mapping import _principal
 from api.settings.config import BrowserCookiePolicy
-from identity.application.login.command import LoginCommand
-from identity.application.logout.command import LogoutCommand
-from identity.application.logout_all_sessions.command import LogoutAllSessionsCommand
-from identity.application.module import IdentityModule
-from identity.application.select_active_project.command import SelectActiveProjectCommand
+from identity.application.authentication.login.command import LoginCommand
+from identity.application.authentication.logout.command import LogoutCommand
+from identity.application.interfaces.dispatch import IdentityModule
+from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand
+from identity.application.sessions.select_active_project.command import (
+    SelectActiveProjectCommand,
+)
 
 router = APIRouter()
 
@@ -108,7 +110,7 @@ async def logout_all(
     cookie_policy: FromDishka[BrowserCookiePolicy],
 ) -> dict[str, int]:
     count = await module.execute(
-        LogoutAllSessionsCommand(
+        RevokeAllSessionsCommand(
             require_cookie_session(browser_credentials(request)),
             csrf_token,
             request.headers.get("origin"),

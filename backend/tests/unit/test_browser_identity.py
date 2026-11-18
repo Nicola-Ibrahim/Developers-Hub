@@ -6,23 +6,57 @@ import pytest
 from starlette.requests import Request
 
 from api.core.errors import APIError
-from api.identity.authentication.credentials import browser_credentials
-from identity.application.change_password.handler import (
+from api.identity.authentication.credentials import (
+    BrowserCredentials,
+    browser_credentials,
+    require_valid_browser_session,
+)
+from identity.application.accounts.change_password.handler import (
     PreparedPasswordChange,
     verify_password_change,
 )
-from identity.application.login.handler import verify_login_credentials
-from identity.application.shared.principal import principal_for_project
-from identity.domain.browser_credentials import (
-    normalize_user_name,
-    session_expiry,
-    session_is_valid,
-    validate_password,
+from identity.application.authentication.login.command import LoginCommand
+from identity.application.authentication.login.handler import (
+    LoginHandler,
 )
+from identity.application.shared.principal import principal_for_project
+from identity.application.shared.session_security import BrowserMutationAuthorizer
+from identity.domain.browser_credentials import validate_password
 from identity.domain.browser_errors import BrowserAuthenticationRejected
 from identity.domain.errors import IdentityValidationError
 from identity.domain.records import AccountCredentials, MembershipDetails
+from identity.domain.value_objects.session_expiry import SessionExpiry
+from identity.domain.value_objects.user_name import UserName
+from identity.infra.security.browser_tokens import JwtBrowserSessionTokens
+from identity.infra.security.login_verifier import (
+    LoginCredentialVerifier as InfraLoginCredentialVerifier,
+)
 from identity.infra.security.passwords import ScryptPasswordHasher
+
+
+def test_browser_mutation_checks_origin_before_locking_and_rejects_invalid_csrf():
+    now = datetime.now(UTC)
+    calls = []
+
+    class Repository:
+        async def authorize_browser_operation(self, token, project, at, *, lock_for_mutation):
+            calls.append((token, project, at, lock_for_mutation))
+            return object()
+
+        async def validate_csrf(self, token, csrf):
+            calls.append((token, csrf))
+            return False
+
+    authorizer = BrowserMutationAuthorizer(
+        Repository(), lambda: now, lambda secret: f"digest:{secret}", ("https://hub.test",)
+    )
+    with pytest.raises(BrowserAuthenticationRejected):
+        asyncio.run(authorizer.authorize_mutation("session", "csrf", "https://other.test"))
+    assert calls == []
+
+    with pytest.raises(BrowserAuthenticationRejected):
+        asyncio.run(authorizer.authorize_mutation("session", "csrf", "https://hub.test/"))
+    assert calls == [("digest:session", None, now, True), ("digest:session", "digest:csrf")]
 
 
 def request(headers=(), cookies=b""):
@@ -33,9 +67,9 @@ def request(headers=(), cookies=b""):
 
 
 def test_username_and_password_policy_is_normalized_and_bounded():
-    assert normalize_user_name("  Alice.Dev ") == "alice.dev"
+    assert UserName.parse("  Alice.Dev ").value == "alice.dev"
     with pytest.raises(IdentityValidationError):
-        normalize_user_name("not a valid username")
+        UserName.parse("not a valid username")
     validate_password("correct-horse-battery")
     with pytest.raises(IdentityValidationError):
         validate_password("short")
@@ -49,35 +83,11 @@ def test_scrypt_hash_verifies_only_matching_password_and_never_embeds_plaintext(
     assert not hasher.verify("wrong-password", encoded)
 
 
-def test_browser_session_expiry_caps_idle_window_and_rejects_disabled_or_revoked_user():
+def test_browser_session_expiry_sets_idle_and_absolute_deadlines():
     now = datetime(2026, 11, 1, tzinfo=UTC)
-    idle, absolute = session_expiry(now)
-    assert idle == now + timedelta(minutes=30)
-    assert absolute == now + timedelta(hours=8)
-    assert session_is_valid(
-        now=now + timedelta(minutes=1),
-        last_seen_at=now,
-        idle_expires_at=idle,
-        absolute_expires_at=absolute,
-        revoked_at=None,
-        user_active=True,
-    )
-    assert not session_is_valid(
-        now=now + timedelta(minutes=1),
-        last_seen_at=now,
-        idle_expires_at=idle,
-        absolute_expires_at=absolute,
-        revoked_at=None,
-        user_active=False,
-    )
-    assert not session_is_valid(
-        now=now + timedelta(minutes=1),
-        last_seen_at=now,
-        idle_expires_at=idle,
-        absolute_expires_at=absolute,
-        revoked_at=now,
-        user_active=True,
-    )
+    expiry = SessionExpiry.from_login(now)
+    assert expiry.idle_at == now + timedelta(minutes=30)
+    assert expiry.absolute_at == now + timedelta(hours=8)
 
 
 def test_browser_principal_has_only_live_selected_project_authority():
@@ -119,30 +129,92 @@ def test_browser_transport_parses_project_header_and_rejects_cookie_bearer_ambig
     assert error.value.code == "ambiguous_credentials"
 
 
-def test_browser_login_uses_dummy_hash_for_missing_user_and_requires_active_account():
+@pytest.mark.parametrize("token", ["malformed.cookie.value", "a.b.c"])
+def test_browser_cookie_guard_rejects_malformed_jwt(token):
+    verifier = JwtBrowserSessionTokens("test-signing-material-" * 3)
+    with pytest.raises(APIError) as error:
+        require_valid_browser_session(BrowserCredentials(token, None), verifier)
+    assert error.value.status == 401
+
+
+def test_browser_cookie_guard_rejects_expired_jwt():
+    verifier = JwtBrowserSessionTokens("test-signing-material-" * 3)
+    now = datetime.now(UTC)
+    token = verifier.issue("account", now - timedelta(minutes=2), now - timedelta(minutes=1))
+    with pytest.raises(APIError) as error:
+        require_valid_browser_session(BrowserCredentials(token, None), verifier)
+    assert error.value.status == 401
+
+
+def test_browser_login_verifier_uses_dummy_hash_for_missing_user():
     hasher = ScryptPasswordHasher()
-    dummy_hash = hasher.hash("devops-hub-dummy-password-value")
-    async def check() -> tuple[object, object]:
-        missing = await verify_login_credentials(
-            hasher, dummy_hash, "unknown", "wrong-password", None
-        )
-        inactive = await verify_login_credentials(
-            hasher,
-            dummy_hash,
-            " Alice ",
-            "correct-horse-battery",
-            AccountCredentials(
-                uuid4(), "alice", hasher.hash("correct-horse-battery"), 4, False, ()
-            )
-        )
-        return missing, inactive
+    verifier = InfraLoginCredentialVerifier(hasher)
 
-    missing, inactive = asyncio.run(check())
+    assert not asyncio.run(verifier.verify("wrong-password", None))
 
-    assert missing.normalized_user_name == "unknown"
-    assert not missing.accepted
-    assert inactive.normalized_user_name == "alice"
-    assert not inactive.accepted
+
+def test_login_handler_commits_rejected_credentials_before_returning_rejection():
+    events = []
+
+    class Repository:
+        async def find_login_account(self, name):
+            events.append(("find", name))
+            return None
+
+        async def complete_login(self, **values):
+            events.append(("complete", values["accepted"]))
+            return None
+
+        async def select_project(self, **values):
+            raise AssertionError("rejected login cannot select a project")
+
+        async def logout(self, *values):
+            raise AssertionError("rejected login cannot compensate")
+
+    class Transaction:
+        async def run(self, action):
+            events.append("transaction-start")
+            result = await action(Repository())
+            events.append("transaction-commit")
+            return result
+
+    class Verifier:
+        async def verify(self, password, encoded):
+            events.append(("verify", encoded))
+            return False
+
+    class Tokens:
+        def generate(self):
+            return "opaque-secret"
+
+    class SessionTokenIssuer:
+        def issue(self, subject, issued_at, expires_at):
+            return "session-jwt"
+
+    handler = LoginHandler(
+        Transaction(),
+        Verifier(),
+        Tokens(),
+        lambda: datetime.now(UTC),
+        lambda secret: f"digest:{secret}",
+        ("https://hub.test",),
+        SessionTokenIssuer(),
+    )
+
+    async def execute():
+        with pytest.raises(BrowserAuthenticationRejected):
+            await handler.execute(LoginCommand(" Alice ", "wrong", None, "https://hub.test"))
+
+    asyncio.run(execute())
+    assert events == [
+        "transaction-start",
+        ("find", "alice"),
+        "transaction-commit",
+        ("verify", None),
+        "transaction-start",
+        ("complete", False),
+        "transaction-commit",
+    ]
 
 
 def test_password_change_checks_current_password_and_preserves_version_fence():
@@ -150,6 +222,7 @@ def test_password_change_checks_current_password_and_preserves_version_fence():
     account = AccountCredentials(
         uuid4(), "alice", hasher.hash("current-password-value"), 7, True, ()
     )
+
     async def check() -> None:
         prepared = await verify_password_change(
             hasher, account, "current-password-value", "new-password-value"

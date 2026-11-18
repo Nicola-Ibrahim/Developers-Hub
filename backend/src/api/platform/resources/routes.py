@@ -18,25 +18,27 @@ from api.platform.resources.schemas import (
     ResourceRequest,
     ResourceView,
 )
-from devops_platform.application.database_lifecycle.delete_database.command import (
+from devops_platform.application.module import DeveloperPlatformModule
+from devops_platform.application.resource_management.delete_database.command import (
     DeleteDatabase,
 )
-from devops_platform.application.database_lifecycle.read_activity.query import (
+from devops_platform.application.resource_management.read_activity.query import (
     ReadResourceActivity,
 )
-from devops_platform.application.database_lifecycle.read_connection.query import (
+from devops_platform.application.resource_management.read_connection.query import (
     ReadDatabaseConnection,
 )
-from devops_platform.application.database_lifecycle.renew_lease.command import RenewDatabase
-from devops_platform.application.database_provisioning.read_resources.query import (
+from devops_platform.application.resource_management.read_resources.query import (
     ReadResource,
     ReadResources,
 )
-from devops_platform.application.database_provisioning.submit_database_request.command import (
+from devops_platform.application.resource_management.renew_lease.command import (
+    RenewDatabase,
+)
+from devops_platform.application.resource_management.submit_database_request.command import (
     DatabaseRequest,
     RequestTemporaryDatabase,
 )
-from devops_platform.application.module import DeveloperPlatformModule
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.authorization import authorize_platform_action
 

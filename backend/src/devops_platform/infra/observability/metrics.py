@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from devops_platform.infra.persistence.models import (
+from devops_platform.infra.persistence.models.resources import (
     Operation,
     ProviderOrphanRow,
     Reservation,

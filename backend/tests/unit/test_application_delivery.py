@@ -6,11 +6,11 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from devops_platform.application.application_delivery.shared.ports import (
+
+from devops_platform.application.software_delivery.shared.ports import (
     ApplicationDeliveryFailure,
     TemplateVersion,
 )
-
 from devops_platform.domain.aggregates.application_delivery import ApplicationDelivery
 from devops_platform.domain.entities.application import Application, DeliveryStep
 from devops_platform.infra.security.webhooks import HmacGitHubWebhookVerifier
@@ -156,8 +156,8 @@ def test_template_update_pr_preserves_user_changes_and_uses_owned_branch(monkeyp
     import base64
 
     import httpx
-    from devops_platform.application.application_delivery.shared.ports import GeneratedFile
 
+    from devops_platform.application.software_delivery.shared.ports import GeneratedFile
     from devops_platform.infra.providers.github import GitHubRepositoryAdapter
 
     def digest(value):

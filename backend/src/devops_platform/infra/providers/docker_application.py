@@ -10,11 +10,11 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 from uuid import UUID
 
-from devops_platform.application.workload_delivery.shared.database_binding import (
+from devops_platform.application.software_delivery.shared.database_binding import (
     ApplicationDatabaseBinding,
     ApplicationDatabaseBindingResolver,
 )
-from devops_platform.application.workload_delivery.shared.ports import (
+from devops_platform.application.software_delivery.shared.ports import (
     ApplicationDeliveryFailure,
     ApplicationDeployer,
 )

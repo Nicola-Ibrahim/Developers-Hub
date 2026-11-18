@@ -4,18 +4,35 @@ from uuid import uuid4
 
 import pytest
 
-from identity.application.authenticate_session.handler import AuthenticateSessionHandler
-from identity.application.authenticate_session.query import AuthenticateSessionQuery
-from identity.application.create_user.command import CreateUserCommand
-from identity.application.create_user.handler import CreateUserHandler
-from identity.application.list_project_members.handler import ListProjectMembersHandler
-from identity.application.list_project_members.query import ListProjectMembersByActorQuery
-from identity.application.manage_project_membership.command import SetProjectMembershipCommand
-from identity.application.manage_project_membership.handler import SetProjectMembershipHandler
+from composition.integrations.project_access import ProjectAccessApplicationBridge
+from identity.application.accounts.create_user.command import CreateUserCommand
+from identity.application.accounts.create_user.handler import CreateUserHandler
+from identity.application.authentication.authenticate_session.handler import (
+    AuthenticateSessionHandler,
+)
+from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
+from identity.application.project_access.list_project_members.handler import (
+    ListProjectMembersHandler,
+)
+from identity.application.project_access.list_project_members.query import ListProjectMembersQuery
+from identity.application.project_access.manage_project_membership.command import (
+    SetProjectMembershipCommand,
+)
+from identity.application.project_access.manage_project_membership.handler import (
+    SetProjectMembershipHandler,
+)
 from identity.domain.errors import IdentityValidationError
 from identity.domain.records import SessionPrincipal
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+class Transaction:
+    def __init__(self, repository):
+        self.repository = repository
+
+    async def run(self, action):
+        return await action(self.repository)
 
 
 class Passwords:
@@ -34,7 +51,7 @@ def test_create_internal_user_handler_builds_normalized_domain_name() -> None:
 
     repository = Repository()
     asyncio.run(
-        CreateUserHandler(repository, Passwords(), lambda: NOW).execute(
+        CreateUserHandler(Transaction(repository), Passwords(), lambda: NOW).execute(
             CreateUserCommand(" Developer ", "long-enough-password")
         )
     )
@@ -49,9 +66,9 @@ def test_membership_command_validates_project_role_before_persistence() -> None:
 
     with pytest.raises(IdentityValidationError, match="role"):
         asyncio.run(
-            SetProjectMembershipHandler(Repository(), lambda: NOW).execute(
-                SetProjectMembershipCommand(uuid4(), uuid4(), uuid4(), "owner")
-            )
+            SetProjectMembershipHandler(
+                Transaction(Repository()), ProjectAccessApplicationBridge(), lambda: NOW
+            ).execute(SetProjectMembershipCommand(uuid4(), uuid4(), uuid4(), "owner"))
         )
 
 
@@ -59,15 +76,20 @@ def test_project_member_query_is_read_only_and_receives_authorized_actor() -> No
     actor_id, project_id = uuid4(), uuid4()
 
     class ReadRepository:
+        async def authenticate_session(self, **values):
+            return SessionPrincipal(
+                actor_id, "dev", uuid4(), project_id, None, None, (), (), ""
+            ), ""
+
         async def list_project_members(self, *, actor_id, project_id):
             self.values = (actor_id, project_id)
             return ()
 
     repository = ReadRepository()
     result = asyncio.run(
-        ListProjectMembersHandler(repository).execute(
-            ListProjectMembersByActorQuery(actor_id, project_id)
-        )
+        ListProjectMembersHandler(
+            Transaction(repository), ProjectAccessApplicationBridge(), lambda: NOW, str
+        ).execute(ListProjectMembersQuery("session", project_id))
     )
 
     assert result == ()
@@ -86,7 +108,7 @@ def test_session_refresh_is_explicitly_a_command() -> None:
     repository = Repository()
     result = asyncio.run(
         AuthenticateSessionHandler(
-            repository, lambda: NOW, lambda value: f"digest:{value}"
+            Transaction(repository), lambda: NOW, lambda value: f"digest:{value}"
         ).execute(AuthenticateSessionQuery("private-session"))
     )
 

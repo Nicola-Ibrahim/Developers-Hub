@@ -10,14 +10,14 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from devops_platform.application.shared.errors import PlatformRequestError
-from devops_platform.application.workload_delivery.execute_delivery_step.handler import (
+from devops_platform.application.software_delivery.execute_delivery_step.handler import (
     ExecuteDeliveryStepHandler,
 )
-from devops_platform.application.workload_delivery.shared.models import (
+from devops_platform.application.software_delivery.shared.models import (
     DeliveryClaim,
     DeliveryResult,
 )
-from devops_platform.application.workload_delivery.shared.ports import (
+from devops_platform.application.software_delivery.shared.ports import (
     ApplicationDeliveryFailure,
     ApplicationDeployer,
     ApprovedImageCatalog,
@@ -25,7 +25,9 @@ from devops_platform.application.workload_delivery.shared.ports import (
     ResourceProvisioner,
     TemplateCatalog,
 )
-from devops_platform.infra.persistence.delivery import SQLAlchemyApplicationDeliveryRepository
+from devops_platform.infra.persistence.repositories.delivery import (
+    SQLAlchemyApplicationDeliveryRepository,
+)
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork
 
 T = TypeVar("T")

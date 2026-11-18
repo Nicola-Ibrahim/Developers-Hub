@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from identity.application.authorization.models import AuthorizationRequest
-from identity.application.authorization.port import AuthorizationUnavailable
+from identity.application.interfaces.authorization import AuthorizationUnavailable
 from identity.infra.authorization.opa import OpaAuthorizationClient
 
 

@@ -10,31 +10,37 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for
 
-from devops_platform.application.database_provisioning.submit_database_request.command import (
+from devops_platform.application.projects.command import RegisterProjectCommand
+from devops_platform.application.resource_management.catalog.models import (
+    PostgresOption,
+    ResourceSize,
+)
+from devops_platform.application.resource_management.submit_database_request.command import (
     DatabaseRequest,
 )
-from devops_platform.application.projects.command import RegisterProjectCommand
-from devops_platform.application.resource_catalog.models import PostgresOption, ResourceSize
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import PlatformRequestError
 from devops_platform.domain.aggregates.resource_lifecycle import ResourceLifecycle
 from devops_platform.domain.value_objects.idempotency_key import IdempotencyKey
 from devops_platform.domain.value_objects.resource_name import ResourceName
 from devops_platform.domain.value_objects.resource_spec import ResourceSpec
-from devops_platform.infra.persistence.ledger_projects import (
-    SQLAlchemyProjectRegistrationRepository,
+from devops_platform.infra.persistence.models.project import (
+    ProjectRegistrationRow,
 )
-from devops_platform.infra.persistence.models import (
+from devops_platform.infra.persistence.models.project_access import ProjectRow, TeamRow
+from devops_platform.infra.persistence.models.resources import (
     IdempotencyRecord,
     Operation,
-    ProjectRegistrationRow,
     QuotaBudget,
     Reservation,
     Resource,
     ResourceActivityRow,
 )
-from devops_platform.infra.persistence.resource_repository import SQLAlchemyResourceRepository
-from identity.infra.persistence.models import InternalUserRow, ProjectRow, TeamRow
+from devops_platform.infra.persistence.repositories.project_registration import (
+    SQLAlchemyProjectRegistrationRepository,
+)
+from devops_platform.infra.persistence.repositories.resource import SQLAlchemyResourceRepository
+from identity.infra.persistence.models.user import InternalUserRow
 
 pytestmark = pytest.mark.postgres
 

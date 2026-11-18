@@ -21,3 +21,12 @@ class TransitionViolation(DomainError):
     """A requested status change violates the lifecycle state machine."""
 
     code = "invalid_resource_transition"
+
+
+class InvalidProjectRole(DomainError):
+    """A membership was assigned a role outside the supported project roles."""
+
+    code = "invalid_project_role"
+
+    def __init__(self) -> None:
+        super().__init__("Unknown project role")

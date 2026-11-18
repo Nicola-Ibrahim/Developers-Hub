@@ -12,7 +12,12 @@ from pydantic import ValidationError
 
 from api.app import create_app
 from api.platform.resources.schemas import AcceptedOperation, ResourceRequest
-from devops_platform.application.database_provisioning.read_resources.query import (
+from devops_platform.application.module import DeveloperPlatformModule
+from devops_platform.application.projects.result import (
+    EnvironmentDetails,
+    ProjectRegistrationDetails,
+)
+from devops_platform.application.resource_management.read_resources.query import (
     OperationDetails,
     ReadOperation,
     ReadProject,
@@ -21,19 +26,15 @@ from devops_platform.application.database_provisioning.read_resources.query impo
     ReadResources,
     ResourceDetails,
 )
-from devops_platform.application.database_provisioning.submit_database_request.command import (
+from devops_platform.application.resource_management.submit_database_request.command import (
     RequestTemporaryDatabase,
-)
-from devops_platform.application.module import DeveloperPlatformModule
-from devops_platform.application.projects.result import (
-    EnvironmentDetails,
-    ProjectRegistrationDetails,
 )
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import PlatformRequestError
-from identity.application.authenticate_api_token.query import AuthenticateApiTokenQuery
-from identity.application.authenticate_session.query import AuthenticateSessionQuery
-from identity.application.module import IdentityModule
+from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
+from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
+from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
+from identity.application.interfaces.dispatch import IdentityModule
 from identity.contracts import AuthenticatedPrincipal
 from identity.domain.errors import AuthenticationRejected
 from identity.domain.records import MembershipDetails, SessionPrincipal
@@ -207,6 +208,15 @@ class ApiOnlyPlatformProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def identity_module(self) -> IdentityModule:
         return FakeIdentityModule()
+
+    @provide(scope=Scope.APP)
+    def session_tokens(self) -> BrowserSessionTokenVerifier:
+        return FakeSessionTokenVerifier()
+
+
+class FakeSessionTokenVerifier:
+    def verify(self, token: str) -> bool:
+        return token == "private-session"
 
 
 def _client(queries: FakePlatformQueries) -> tuple[TestClient, object]:

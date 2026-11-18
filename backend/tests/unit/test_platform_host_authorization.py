@@ -7,9 +7,11 @@ import pytest
 from starlette.requests import Request
 
 from api.platform.module import PlatformRequestModule
-from devops_platform.application.database_provisioning.read_resources.query import ReadResource
+from devops_platform.application.resource_management.read_resources.query import (
+    ReadResource,
+)
 from devops_platform.application.shared.errors import CatalogForbidden
-from devops_platform.domain.access import AccessContext
+from devops_platform.domain.value_objects.access_context import AccessContext
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
 

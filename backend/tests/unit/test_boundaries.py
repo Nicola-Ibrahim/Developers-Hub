@@ -45,6 +45,29 @@ IO_LIBRARIES = {
     "secrets",
 }
 
+# Shared PostgreSQL joins during the project-access ownership migration.
+# Application and domain imports remain isolated.
+SHARED_SCHEMA_IMPORTS = {
+    "identity.infra.persistence.repositories.accounts_sessions": {
+        "devops_platform.infra.persistence.models.project_access",
+        "devops_platform.infra.persistence.models.project_access.ProjectMembershipRow",
+        "devops_platform.infra.persistence.models.project_access.ProjectRow",
+    },
+    "identity.infra.persistence.repositories.api_tokens": {
+        "devops_platform.infra.persistence.models.project_access",
+        "devops_platform.infra.persistence.models.project_access.ProjectMembershipRow",
+        "devops_platform.infra.persistence.models.project_access.ProjectRow",
+    },
+    "devops_platform.infra.persistence.repositories.project_access": {
+        "identity.infra.persistence.models.user",
+        "identity.infra.persistence.models.user.InternalUserRow",
+    },
+    "devops_platform.infra.composition.resource_request_authority": {
+        "identity.infra.persistence.models.user",
+        "identity.infra.persistence.models.user.InternalUserRow",
+    },
+}
+
 
 def imports(source, module, is_package=False):
     package = module if is_package else module.rpartition(".")[0]
@@ -69,6 +92,8 @@ def context_name(module):
 
 
 def violation(module, target):
+    if target in SHARED_SCHEMA_IMPORTS.get(module, ()):
+        return False
     root = module.split(".")[0]
     other = target.split(".")[0]
     target_parts = target.split(".")
@@ -269,11 +294,11 @@ class DenyIO(importlib.abc.MetaPathFinder):
             raise AssertionError('Forbidden dependency: '+fullname)
 sys.meta_path.insert(0,DenyIO())
 if sys.argv[2]=='identity':
-    import identity.application.authenticate_api_token.handler
-    import identity.application.issue_api_token.handler
-    import identity.application.revoke_api_token.handler
+    import identity.application.api_tokens.authenticate_api_token.handler
+    import identity.application.api_tokens.issue_api_token.handler
+    import identity.application.api_tokens.revoke_api_token.handler
 else:
-    import devops_platform.application.resource_catalog.handler,devops_platform.domain
+    import devops_platform.application.resource_management.catalog.handler,devops_platform.domain
 """
         denied = IO_LIBRARIES | (CONTEXTS - {context})
         subprocess.run(

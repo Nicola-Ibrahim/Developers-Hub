@@ -6,47 +6,56 @@ from dataclasses import asdict
 
 from dishka import Provider, Scope, provide
 
-from devops_platform.application.database_lifecycle.delete_database.handler import (
+from devops_platform.application.projects.handler import RegisterProjectHandler
+from devops_platform.application.projects.port import ProjectRegistrationRepository
+from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
+from devops_platform.application.resource_management.catalog.handler import ReadCatalogQueryHandler
+from devops_platform.application.resource_management.delete_database.handler import (
     DeleteTemporaryDatabaseHandler,
 )
-from devops_platform.application.database_lifecycle.ports import ResourceCredentialCipher
-from devops_platform.application.database_lifecycle.read_activity.handler import (
+from devops_platform.application.resource_management.ports import ResourceCredentialCipher
+from devops_platform.application.resource_management.read_activity.handler import (
     ListResourceActivityQueryHandler,
 )
-from devops_platform.application.database_lifecycle.read_connection.handler import (
+from devops_platform.application.resource_management.read_connection.handler import (
     GetDatabaseConnectionQueryHandler,
 )
-from devops_platform.application.database_lifecycle.renew_lease.handler import (
-    RenewDatabaseLeaseHandler,
-)
-from devops_platform.application.database_provisioning.read_resources.handler import (
+from devops_platform.application.resource_management.read_resources.handler import (
     ReadOperationHandler,
     ReadProjectHandler,
     ReadProjectsHandler,
     ReadResourceHandler,
     ReadResourcesHandler,
 )
-from devops_platform.application.database_provisioning.submit_database_request.command import (
+from devops_platform.application.resource_management.renew_lease.handler import (
+    RenewDatabaseLeaseHandler,
+)
+from devops_platform.application.resource_management.submit_database_request.command import (
     DatabaseRequest,
 )
-from devops_platform.application.database_provisioning.submit_database_request.handler import (
+from devops_platform.application.resource_management.submit_database_request.handler import (
     RequestTemporaryDatabaseHandler,
 )
-from devops_platform.application.projects.handler import RegisterProjectHandler
-from devops_platform.application.projects.port import ProjectRegistrationRepository
-from devops_platform.application.resource_catalog.catalog import ApprovedPostgresCatalog
-from devops_platform.application.resource_catalog.handler import ReadCatalogQueryHandler
 from devops_platform.application.shared.resource_repository import ResourceRepository
-from devops_platform.infra.persistence.ledger_projects import (
+from devops_platform.domain.interfaces.project_access_directory import ProjectAccessDirectory
+from devops_platform.infra.persistence.repositories.project_access_directory import (
+    SQLAlchemyProjectAccessDirectory,
+)
+from devops_platform.infra.persistence.repositories.project_registration import (
     SQLAlchemyProjectRegistrationRepository,
 )
-from devops_platform.infra.persistence.resource_repository import SQLAlchemyResourceRepository
+from devops_platform.infra.persistence.repositories.resource import SQLAlchemyResourceRepository
 from devops_platform.infra.security.credentials import FernetResourceCredentialCipher
 from shared.infra.clock import Clock
 from shared.infra.settings import Settings
 
 
 class PlatformProvider(Provider):
+    project_access_directory = provide(
+        SQLAlchemyProjectAccessDirectory,
+        provides=ProjectAccessDirectory,
+        scope=Scope.REQUEST,
+    )
     project_handler = provide(ReadProjectHandler, scope=Scope.REQUEST)
     projects_handler = provide(ReadProjectsHandler, scope=Scope.REQUEST)
     resources_handler = provide(ReadResourcesHandler, scope=Scope.REQUEST)
@@ -80,7 +89,7 @@ class PlatformProvider(Provider):
     @provide(scope=Scope.APP)
     def approved_catalog(self, settings: Settings) -> ApprovedPostgresCatalog:
         # Register the planned option without claiming an implemented provider.
-        from devops_platform.application.resource_catalog.models import PostgresOption
+        from devops_platform.application.resource_management.catalog.models import PostgresOption
 
         enabled = (
             settings.local_provider_enabled

@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import Request
 
 from api.core.errors import APIError
+from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
 
 SESSION_COOKIE = "devops_session"
 PROJECT_HEADER = "X-Project-ID"
@@ -38,3 +39,10 @@ def require_cookie_session(credentials: BrowserCredentials) -> str:
     if not credentials.session_token:
         raise APIError(401, "authentication_required", "Browser session is required")
     return credentials.session_token
+
+
+def require_valid_browser_session(
+    credentials: BrowserCredentials, verifier: BrowserSessionTokenVerifier
+) -> None:
+    if credentials.session_token is not None and not verifier.verify(credentials.session_token):
+        raise APIError(401, "authentication_required", "Browser session is invalid")

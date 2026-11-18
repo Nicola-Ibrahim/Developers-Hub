@@ -4,12 +4,12 @@ import asyncio
 from uuid import uuid4
 
 import pytest
-from devops_platform.application.resource_lifecycle.ports import DatabaseCredentials
 
-from devops_platform.application.database_lifecycle.read_connection.handler import (
+from devops_platform.application.resource_management.ports import DatabaseCredentials
+from devops_platform.application.resource_management.read_connection.handler import (
     GetDatabaseConnectionQueryHandler,
 )
-from devops_platform.application.database_lifecycle.read_connection.query import (
+from devops_platform.application.resource_management.read_connection.query import (
     ReadDatabaseConnection,
 )
 from devops_platform.application.shared.dto import AccessContext

@@ -5,45 +5,43 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from devops_platform.application.project_registration.command import RegisterProjectCommand
-from devops_platform.application.project_registration.handler import RegisterProjectHandler
-from devops_platform.application.project_registration.result import (
+from devops_platform.application.projects.command import RegisterProjectCommand
+from devops_platform.application.projects.handler import RegisterProjectHandler
+from devops_platform.application.projects.result import (
     EnvironmentDetails,
     ProjectRegistrationDetails,
 )
-from devops_platform.application.resource_requests.read_resources.handler import (
+from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
+from devops_platform.application.resource_management.catalog.handler import ReadCatalogQueryHandler
+from devops_platform.application.resource_management.catalog.models import (
+    PostgresOption,
+    ResourceSize,
+)
+from devops_platform.application.resource_management.catalog.query import ReadCatalog
+from devops_platform.application.resource_management.read_resources.handler import (
     ReadOperationHandler,
     ReadProjectHandler,
     ReadResourceHandler,
     ReadResourcesHandler,
 )
-from devops_platform.application.resource_requests.read_resources.query import (
+from devops_platform.application.resource_management.read_resources.query import (
     OperationDetails,
-    ResourceDetails,
-)
-from devops_platform.application.resource_requests.submit_database_request.command import (
-    DatabaseRequest,
-)
-from devops_platform.application.resource_requests.submit_database_request.handler import (
-    RequestTemporaryDatabaseHandler,
-)
-from devops_platform.application.resource_requests.submit_database_request.result import (
-    AcceptedDatabaseRequest,
-)
-
-from devops_platform.application.database_provisioning.read_resources.query import (
     ReadOperation,
     ReadProject,
     ReadResource,
     ReadResources,
+    ResourceDetails,
 )
-from devops_platform.application.database_provisioning.submit_database_request.command import (
+from devops_platform.application.resource_management.submit_database_request.command import (
+    DatabaseRequest,
     RequestTemporaryDatabase,
 )
-from devops_platform.application.resource_catalog.catalog import ApprovedPostgresCatalog
-from devops_platform.application.resource_catalog.handler import ReadCatalogQueryHandler
-from devops_platform.application.resource_catalog.models import PostgresOption, ResourceSize
-from devops_platform.application.resource_catalog.query import ReadCatalog
+from devops_platform.application.resource_management.submit_database_request.handler import (
+    RequestTemporaryDatabaseHandler,
+)
+from devops_platform.application.resource_management.submit_database_request.result import (
+    AcceptedDatabaseRequest,
+)
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import CatalogForbidden, PlatformRequestError
 from devops_platform.authorization import authorize_platform_action

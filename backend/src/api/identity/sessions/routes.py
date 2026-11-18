@@ -15,11 +15,11 @@ from api.identity.authentication.credentials import (
 from api.identity.sessions.mapping import _principal
 from api.identity.sessions.schemas import PasswordBody
 from api.settings.config import BrowserCookiePolicy
-from identity.application.change_password.command import ChangePasswordCommand
-from identity.application.list_sessions.query import ListSessionsQuery
-from identity.application.module import IdentityModule
-from identity.application.revoke_session.command import RevokeSessionCommand
-from identity.application.rotate_csrf.command import RotateCsrfCommand
+from identity.application.accounts.change_password.command import ChangePasswordCommand
+from identity.application.interfaces.dispatch import IdentityModule
+from identity.application.sessions.list_sessions.query import ListSessionsQuery
+from identity.application.sessions.revoke_session.command import RevokeSessionCommand
+from identity.application.sessions.rotate_csrf.command import RotateCsrfCommand
 
 router = APIRouter()
 

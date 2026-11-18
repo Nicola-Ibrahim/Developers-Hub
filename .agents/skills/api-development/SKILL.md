@@ -1,58 +1,37 @@
 ---
 name: api-development
-description: Change or verify a Developers-Hub FastAPI endpoint, including its request schema, permissions and compatibility.
+description: Design, implement, refactor, or review API endpoints, contracts, and integrations.
 ---
 
-# FastAPI contract change
-
-Use when HTTP behavior changes or when auditing
-API-to-use-case wiring.
+# API Development
 
 ## Procedure
 
-1. Identify:
-   - HTTP method and path
-   - Request/response schemas
-   - Authentication source
-   - Permission decision
-   - Expected status codes and errors
+1. Identify the consumer, requested operation, and expected result.
 
-2. Trace the route through the context module to the
-   owning application use case.
+2. Inspect existing routes, schemas, callers, and application logic.
 
-3. Keep domain mutations and direct ORM operations
-   out of API routes.
+3. Evaluate:
+   - Contract correctness and consistency
+   - Input validation
+   - Authentication and authorization where applicable
+   - Error handling
+   - Duplicate endpoints or responsibilities
+   - Compatibility and integration requirements
 
-4. Clarify:
-   - Authorization
-   - Idempotency
-   - API compatibility
-   - Error mapping
-   - Sensitive credential disclosure
+4. Design a clear API contract using existing conventions
+   where appropriate.
 
-5. Change only the required routes, schemas,
-   module wiring and dependent callers.
+5. Implement the necessary changes without duplicating
+   business logic across layers.
 
-6. Avoid duplicating checks without a clear
-   security or ownership reason.
+6. Verify successful, invalid, and relevant failure scenarios.
 
-7. Test:
-   - Successful request
-   - Invalid input
-   - Denied access
-   - Relevant failure path
-   - Retry behavior when applicable
+## Principles
 
-8. Compare API/OpenAPI contracts where compatibility
-   with existing clients matters.
-
-## Handoff
-
-Report:
-- HTTP behavior changed
-- Compatibility preserved
-- Authentication/authorization impact
-- Tests performed and remaining gaps
-
-If domain meaning changes, return the decision
-to the coordinator before implementation.
+- Do not prescribe a particular authentication mechanism.
+- Do not assume existing API contracts are correctly designed.
+- Separate transport concerns from business responsibilities.
+- Avoid unnecessary endpoints and abstraction layers.
+- Identify intentional breaking changes explicitly.
+- Report verification results concisely.

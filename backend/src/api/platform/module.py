@@ -7,34 +7,36 @@ from typing import Any, Literal, TypeVar, cast
 from dishka import AsyncContainer
 from fastapi import Request
 
+from api.composition.browser_access import authenticate_browser_operation
 from api.composition.platform_access import authenticate_platform_access
 from api.core.security.request_identity import BrowserRequestCredentials, RequestIdentity
-from devops_platform.application.database_provisioning.read_resources.query import ReadProjects
-from devops_platform.application.module import DeveloperPlatformModule
-from devops_platform.application.shared.dto import AccessContext
-from devops_platform.application.shared.errors import PlatformRequestError, ledger_unavailable
-from devops_platform.application.workload_delivery.attach_database.command import AttachDatabase
-from devops_platform.application.workload_delivery.create_workload.command import (
+from devops_platform.application.applications.create_application.command import (
     CreateApplication,
 )
-from devops_platform.application.workload_delivery.deploy_workload.command import (
-    DeployApplication,
-)
-from devops_platform.application.workload_delivery.handle_preview_webhook.command import (
-    ProcessGithubPreviewWebhook,
-)
-from devops_platform.application.workload_delivery.read_templates.query import ReadTemplates
-from devops_platform.application.workload_delivery.read_workloads.query import (
+from devops_platform.application.applications.read_applications.query import (
     ReadApplication,
     ReadApplications,
     ReadDeploymentHistory,
 )
-from devops_platform.application.workload_delivery.retry_delivery_step.command import (
+from devops_platform.application.applications.read_templates.query import ReadTemplates
+from devops_platform.application.module import DeveloperPlatformModule
+from devops_platform.application.resource_management.read_resources.query import (
+    ReadProjects,
+)
+from devops_platform.application.shared.dto import AccessContext
+from devops_platform.application.shared.errors import PlatformRequestError, ledger_unavailable
+from devops_platform.application.software_delivery.attach_database.command import AttachDatabase
+from devops_platform.application.software_delivery.deploy_application.command import (
+    DeployApplication,
+)
+from devops_platform.application.software_delivery.handle_preview_webhook.command import (
+    ProcessGithubPreviewWebhook,
+)
+from devops_platform.application.software_delivery.retry_delivery_step.command import (
     RetryDeliveryStep,
 )
 from devops_platform.authorization import ALL_SCOPES, authorize_platform_action
 from devops_platform.infra.composition.module import DeveloperPlatformModuleDispatcher
-from identity.infra.hosts.identity_sessions import authenticate_browser_operation
 from shared.dispatch import Command, Query
 from shared.infra.clock import Clock
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork

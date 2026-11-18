@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from devops_platform.application.workers.resource_operations.handler import (
     ResourceWorkerHandler,
 )
-from devops_platform.infra.persistence.worker_queue import (
+from devops_platform.infra.persistence.repositories.worker_queue import (
     PostgresResourceEffectGuard,
     SqlAlchemyProvisioningQueue,
 )

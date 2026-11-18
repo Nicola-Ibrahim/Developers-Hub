@@ -5,33 +5,36 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from devops_platform.application.resource_lifecycle.ports import (
-    DatabaseCredentials,
-    DatabaseEndpoint,
-    DeletionObservation,
-    ProviderFailure,
-)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for
 
-from devops_platform.domain.leases import LeasePolicy
-from devops_platform.domain.resources import DesiredState, ResourceStatus
-from devops_platform.infra.persistence.models import (
-    Operation,
+from devops_platform.application.resource_management.ports import (
+    DatabaseCredentials,
+    DatabaseEndpoint,
+    DeletionObservation,
+    ProviderFailure,
+)
+from devops_platform.domain.value_objects.lease import LeasePolicy
+from devops_platform.domain.value_objects.statuses import DesiredState, ResourceStatus
+from devops_platform.infra.persistence.models.project import (
     ProjectEnvironmentRow,
     ProjectRegistrationRow,
+)
+from devops_platform.infra.persistence.models.project_access import ProjectRow, TeamRow
+from devops_platform.infra.persistence.models.resources import (
+    Operation,
     ProviderOrphanRow,
     QuotaBudget,
     Reservation,
     Resource,
     ResourceSecret,
 )
-from devops_platform.infra.persistence.resource_repository import SQLAlchemyResourceRepository
-from devops_platform.infra.persistence.worker_queue import SqlAlchemyProvisioningQueue
+from devops_platform.infra.persistence.repositories.resource import SQLAlchemyResourceRepository
+from devops_platform.infra.persistence.repositories.worker_queue import SqlAlchemyProvisioningQueue
 from devops_platform.infra.security.credentials import FernetResourceCredentialCipher
-from identity.infra.persistence.models import InternalUserRow, ProjectRow, TeamRow
+from identity.infra.persistence.models.user import InternalUserRow
 
 pytestmark = pytest.mark.postgres
 KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="

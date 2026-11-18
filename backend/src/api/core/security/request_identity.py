@@ -4,10 +4,16 @@ from dataclasses import dataclass, field
 from typing import Annotated
 from uuid import UUID
 
+from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from api.identity.authentication.credentials import CSRF_HEADER, browser_credentials
+from api.identity.authentication.credentials import (
+    CSRF_HEADER,
+    browser_credentials,
+    require_valid_browser_session,
+)
+from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
 
 
 @dataclass(frozen=True)
@@ -23,10 +29,14 @@ type RequestIdentity = str | BrowserRequestCredentials | None
 bearer = HTTPBearer(auto_error=False)
 
 
+@inject
 async def request_identity(
-    request: Request, credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
+    session_tokens: FromDishka[BrowserSessionTokenVerifier],
 ) -> RequestIdentity:
     browser = browser_credentials(request)
+    require_valid_browser_session(browser, session_tokens)
     if browser.session_token is not None:
         identity: RequestIdentity = BrowserRequestCredentials(
             browser.session_token,

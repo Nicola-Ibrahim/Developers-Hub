@@ -1,0 +1,1 @@
+"""Identity SQLAlchemy table mappings."""

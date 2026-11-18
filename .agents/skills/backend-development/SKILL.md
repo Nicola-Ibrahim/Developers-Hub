@@ -1,56 +1,49 @@
 ---
 name: backend-development
-description: Consolidate or refactor an existing Developers-Hub backend use case across handlers, domain rules and repository ports.
+description: Design, implement, refactor, or review backend behavior, domain models, application use cases, and persistence.
 ---
 
-# Backend use-case refactor
-
-Use for backend refactoring or a new business use case
-spanning multiple layers. Not every Python edit.
+# Backend Development
 
 ## Procedure
 
-1. Start with the requested observable behavior.
+1. Understand the requested behavior and business requirements.
 
-2. Trace all relevant entry points:
-   - HTTP, worker, operator or CLI
-   - Command/query registration
-   - Application handler
-   - Domain entity, aggregate or policy
-   - Repository port
-   - Persistence or provider adapter
-   - Existing tests
+2. Inspect relevant implementation, entry points, dependencies,
+   callers, and tests. Use targeted searches.
 
-3. Classify each operation as:
-   - Public business use case
-   - Trusted operator use case
-   - Internal workflow step
-   - Confirmed duplicate or dead code
+3. Critically evaluate the current design:
+   - Incorrect or missing behavior
+   - Duplicate responsibilities and logic
+   - Unnecessary abstractions or forwarding layers
+   - Misplaced business rules
+   - Poor aggregate or transaction boundaries
+   - Unused code and interfaces
 
-4. Choose one clear application orchestration path.
+4. Identify the simplest coherent design that satisfies
+   the requirements. Challenge existing patterns when necessary.
 
-   Internal checks may be ordinary methods or functions.
-   Do not generate a command/handler pair for every helper.
-   Do not introduce aggregates without meaningful invariants.
+5. Implement within the agreed scope:
+   - Keep responsibilities clearly owned.
+   - Introduce abstractions only when justified.
+   - Reuse existing code when appropriate.
+   - Remove obsolete code after verifying dependencies.
+   - Respect applicable architectural boundaries.
 
-5. Preserve:
-   - Authentication and authorization
-   - Sessions and CSRF protection
-   - Credential security
-   - Transaction boundaries
-   - Optimistic concurrency
-   - Idempotency and retry behavior
-   - Worker recovery and cleanup
+6. Verify correctness:
+   - Test expected behavior and important failure cases.
+   - Check affected integrations and callers.
+   - Run relevant static checks.
 
-6. Remove obsolete code only after migrating all callers,
-   DI registrations, tests and imports.
+7. Report changes, decisions, verification, and remaining risks.
 
-7. Run focused tests first.
-   Use disposable infrastructure for integration tests.
+## Principles
 
-## Useful search examples
-
-```bash
-rg 'LoginCommand|LoginHandler|BrowserIdentityService' backend/src backend/tests
-
-rg 'RegisterProjectCommand|CreateApplication|ApplicationDelivery' backend/src backend/tests
+- Existing code is evidence, not architectural authority.
+- Do not preserve incorrect behavior merely for compatibility.
+- Do not rewrite correct behavior without a reason.
+- Do not force particular patterns, frameworks, or mechanisms.
+- Evaluate security, consistency, and concurrency where relevant.
+- Prefer focused changes over speculative architecture.
+- Escalate material contract or behavioral changes outside scope.
+- Do not create unnecessary plans, files, or abstractions.

@@ -4,8 +4,8 @@ import asyncio
 import unittest
 from uuid import UUID
 
-from devops_platform.application.resource_catalog.handler import ReadCatalogQueryHandler
-from devops_platform.application.resource_catalog.query import ReadCatalog
+from devops_platform.application.resource_management.catalog.handler import ReadCatalogQueryHandler
+from devops_platform.application.resource_management.catalog.query import ReadCatalog
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import CatalogForbidden
 from devops_platform.authorization import ALL_SCOPES, authorize_platform_action

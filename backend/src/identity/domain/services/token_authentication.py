@@ -1,49 +1,32 @@
-"""Domain policy for authenticating an API token from a persisted snapshot."""
+"""API token credential eligibility rules."""
 
-from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
-from uuid import UUID
+from typing import Literal, cast
 
+from identity.domain.aggregates.api_token import (
+    ApiTokenAuthenticationDetails,
+    AuthenticatedPrincipal,
+)
 from identity.domain.errors import AuthenticationRejected
 
 
-@dataclass(frozen=True, slots=True)
-class AuthenticatedIdentity:
-    user_id: UUID
-    project_id: UUID
-    token_id: UUID
-    role: Literal["developer", "admin"]
-    scopes: frozenset[str]
-
-
-def authenticate_token(
-    *,
-    token_id: UUID | None,
-    user_id: UUID | None,
-    project_id: UUID | None,
-    role: str | None,
-    scopes: tuple[str, ...],
-    user_active: bool,
-    expires_at: datetime | None,
-    revoked_at: datetime | None,
-    now: datetime,
-) -> AuthenticatedIdentity:
+def authenticate_api_token_credentials(
+    snapshot: ApiTokenAuthenticationDetails | None, now: datetime
+) -> AuthenticatedPrincipal:
+    if snapshot is None:
+        raise AuthenticationRejected()
+    role = snapshot.role
     if (
-        token_id is None
-        or user_id is None
-        or project_id is None
-        or expires_at is None
-        or not user_active
-        or revoked_at is not None
-        or expires_at <= now
-        or role not in {"developer", "admin"}
+        not snapshot.user_active
+        or snapshot.revoked_at is not None
+        or snapshot.expires_at <= now
+        or (role != "developer" and role != "admin")
     ):
         raise AuthenticationRejected()
-    return AuthenticatedIdentity(
-        user_id=user_id,
-        project_id=project_id,
-        token_id=token_id,
-        role=role,  # type: ignore[arg-type]
-        scopes=frozenset(scopes),
+    return AuthenticatedPrincipal(
+        user_id=snapshot.user_id,
+        project_id=snapshot.project_id,
+        token_id=snapshot.token_id,
+        role=cast("Literal['developer', 'admin']", role),
+        scopes=frozenset(snapshot.scopes),
     )

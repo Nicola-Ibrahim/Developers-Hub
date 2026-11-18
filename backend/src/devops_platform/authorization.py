@@ -8,55 +8,57 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
-from devops_platform.application.database_lifecycle.delete_database.command import (
+from devops_platform.application.applications.create_application.command import (
+    CreateApplication,
+)
+from devops_platform.application.applications.read_applications.query import (
+    ReadApplication,
+    ReadApplications,
+    ReadDeploymentHistory,
+)
+from devops_platform.application.applications.read_templates.query import ReadTemplates
+from devops_platform.application.resource_management.catalog.query import ReadCatalog
+from devops_platform.application.resource_management.delete_database.command import (
     DeleteDatabase,
 )
-from devops_platform.application.database_lifecycle.read_activity.query import (
+from devops_platform.application.resource_management.read_activity.query import (
     ReadResourceActivity,
 )
-from devops_platform.application.database_lifecycle.read_connection.query import (
+from devops_platform.application.resource_management.read_connection.query import (
     ReadDatabaseConnection,
 )
-from devops_platform.application.database_lifecycle.renew_lease.command import RenewDatabase
-from devops_platform.application.database_provisioning.read_resources.query import (
+from devops_platform.application.resource_management.read_resources.query import (
     ReadOperation,
     ReadProject,
     ReadProjects,
     ReadResource,
     ReadResources,
 )
-from devops_platform.application.database_provisioning.submit_database_request.command import (
+from devops_platform.application.resource_management.renew_lease.command import (
+    RenewDatabase,
+)
+from devops_platform.application.resource_management.submit_database_request.command import (
     RequestTemporaryDatabase,
 )
-from devops_platform.application.resource_catalog.query import ReadCatalog
 from devops_platform.application.shared.errors import (
     CatalogForbidden,
     PlatformRequestError,
     resource_not_found,
 )
-from devops_platform.application.workload_delivery.attach_database.command import AttachDatabase
-from devops_platform.application.workload_delivery.create_local_preview.command import (
+from devops_platform.application.software_delivery.attach_database.command import AttachDatabase
+from devops_platform.application.software_delivery.create_local_preview.command import (
     CreateLocalPreview,
 )
-from devops_platform.application.workload_delivery.create_workload.command import (
-    CreateApplication,
-)
-from devops_platform.application.workload_delivery.deploy_workload.command import (
+from devops_platform.application.software_delivery.deploy_application.command import (
     DeployApplication,
 )
-from devops_platform.application.workload_delivery.handle_preview_webhook.command import (
+from devops_platform.application.software_delivery.handle_preview_webhook.command import (
     ProcessGithubPreviewWebhook,
 )
-from devops_platform.application.workload_delivery.read_templates.query import ReadTemplates
-from devops_platform.application.workload_delivery.read_workloads.query import (
-    ReadApplication,
-    ReadApplications,
-    ReadDeploymentHistory,
-)
-from devops_platform.application.workload_delivery.retry_delivery_step.command import (
+from devops_platform.application.software_delivery.retry_delivery_step.command import (
     RetryDeliveryStep,
 )
-from devops_platform.domain.access import AccessContext
+from devops_platform.domain.value_objects.access_context import AccessContext
 
 ALL_SCOPES = (
     "catalog:read",

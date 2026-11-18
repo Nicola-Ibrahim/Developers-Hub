@@ -1,57 +1,34 @@
 ---
 name: frontend-development
-description: Change an existing Developers-Hub Next.js portal workflow or its integration with an API endpoint.
+description: Design, implement, refactor, or review user interfaces and frontend workflows.
 ---
 
-# Developer portal workflow
-
-Use for a concrete user flow, not generic frontend work.
+# Frontend Development
 
 ## Procedure
 
-1. Trace the affected page or feature through:
-   - User interaction
-   - Frontend state
-   - API client
-   - Session/project context
-   - Backend contract
+1. Understand the user goal and expected interaction.
 
-2. Handle relevant UI states:
-   - Loading
-   - Empty
-   - Permission denied
-   - Operation in progress
-   - Failed
-   - Retry or recovery
+2. Inspect relevant components, state, routes, and API integrations.
 
-3. Keep Next.js server/client responsibilities explicit.
+3. Evaluate:
+   - Usability and information hierarchy
+   - Component responsibilities
+   - Duplicate logic and unnecessary state
+   - Data flow and integration correctness
+   - Accessibility and responsiveness
+   - Relevant error and loading behavior
 
-4. Never expose resource credentials in:
-   - Logs
-   - URLs
-   - Persistent browser storage
-   - Unrelated UI components
+4. Choose the simplest maintainable implementation
+   consistent with the product requirements.
 
-5. Prefer existing UI patterns.
-   Avoid introducing another state-management
-   framework for a small feature.
+5. Implement and verify the affected user workflow.
 
-6. Validate the requested user journey, including:
-   - Project switching
-   - Session expiration
-   - Failed requests
-   - Pending asynchronous operations
+## Principles
 
-7. Run relevant type/build checks.
-   Distinguish successful builds from actual browser tests.
-
-## Handoff
-
-Report:
-- Observable user outcome
-- API integration changes
-- Verification performed
-- Untested scenarios
-
-Consult frontend/AGENTS.md and frontend/DESIGN.md
-only when relevant to the change.
+- Do not introduce libraries or patterns without a clear need.
+- Reuse components when meaningful, not merely for abstraction.
+- Do not preserve poor UI structure just because it exists.
+- Avoid unrelated redesigns.
+- Use the framework conventions appropriate to the project.
+- Distinguish static checks from actual runtime verification.

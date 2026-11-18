@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from devops_platform.domain.access import AccessContext as AccessContext
+from devops_platform.domain.value_objects.access_context import AccessContext as AccessContext
 
 if TYPE_CHECKING:
-    from devops_platform.application.resource_catalog.models import PostgresOption
+    from devops_platform.application.resource_management.catalog.models import PostgresOption
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,14 +4,16 @@ from uuid import uuid4
 
 import pytest
 
-from identity.application.authenticate_api_token.handler import AuthenticateApiTokenHandler
-from identity.application.authenticate_api_token.query import AuthenticateApiTokenQuery
-from identity.application.issue_api_token.command import IssueApiTokenCommand
-from identity.application.issue_api_token.handler import IssueApiTokenHandler
-from identity.application.issue_api_token.result import PreparedApiToken
-from identity.application.revoke_api_token.command import RevokeApiTokenCommand
-from identity.application.revoke_api_token.handler import RevokeApiTokenHandler
-from identity.domain.credentials import ApiTokenAuthenticationDetails
+from identity.application.api_tokens.authenticate_api_token.handler import (
+    AuthenticateApiTokenHandler,
+)
+from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
+from identity.application.api_tokens.issue_api_token.command import IssueApiTokenCommand
+from identity.application.api_tokens.issue_api_token.handler import IssueApiTokenHandler
+from identity.application.api_tokens.issue_api_token.result import PreparedApiToken
+from identity.application.api_tokens.revoke_api_token.command import RevokeApiTokenCommand
+from identity.application.api_tokens.revoke_api_token.handler import RevokeApiTokenHandler
+from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.domain.errors import AuthenticationRejected, IdentityValidationError
 from identity.domain.records import ApiTokenStatus, ProjectMembershipStatus
 from identity.infra.security.credential_file import PrivateCredentialFile
@@ -54,6 +56,14 @@ class FakeRepository:
         self.calls.append(("revoke_api_token", token_id, revoked_at))
 
 
+class FakeTransaction:
+    def __init__(self, repository):
+        self.repository = repository
+
+    async def run(self, action):
+        return await action(self.repository)
+
+
 class FakeHasher:
     def digest(self, token):
         return "synthetic-digest"
@@ -88,9 +98,9 @@ def test_authenticate_api_token_reads_repository_and_rejects_malformed_before_qu
     )
     repository = FakeRepository(credential=snapshot)
     result = asyncio.run(
-        AuthenticateApiTokenHandler(repository, PepperedTokenHasher("p" * 32), lambda: NOW).execute(
-            AuthenticateApiTokenQuery(TOKEN)
-        )
+        AuthenticateApiTokenHandler(
+            FakeTransaction(repository), PepperedTokenHasher("p" * 32), lambda: NOW
+        ).execute(AuthenticateApiTokenQuery(TOKEN))
     )
     assert result.role == "developer"
     assert result.scopes == frozenset({"catalog:read"})
@@ -100,7 +110,7 @@ def test_authenticate_api_token_reads_repository_and_rejects_malformed_before_qu
         with pytest.raises(AuthenticationRejected):
             asyncio.run(
                 AuthenticateApiTokenHandler(
-                    repository, PepperedTokenHasher("p" * 32), lambda: NOW
+                    FakeTransaction(repository), PepperedTokenHasher("p" * 32), lambda: NOW
                 ).execute(AuthenticateApiTokenQuery(invalid))
             )
     assert len(repository.calls) == 1
@@ -130,9 +140,9 @@ def test_authenticate_api_token_rejects_invalid_repository_snapshot(changes):
     repository = FakeRepository(credential=ApiTokenAuthenticationDetails(**values))
     with pytest.raises(AuthenticationRejected):
         asyncio.run(
-            AuthenticateApiTokenHandler(repository, FakeHasher(), lambda: NOW).execute(
-                AuthenticateApiTokenQuery(TOKEN)
-            )
+            AuthenticateApiTokenHandler(
+                FakeTransaction(repository), FakeHasher(), lambda: NOW
+            ).execute(AuthenticateApiTokenQuery(TOKEN))
         )
 
 
@@ -184,7 +194,9 @@ def test_revoke_api_token_is_idempotent_and_audits_only_first_revoke():
     missing = FakeRepository(token=None)
     assert (
         asyncio.run(
-            RevokeApiTokenHandler(missing, lambda: NOW).execute(RevokeApiTokenCommand(token_id))
+            RevokeApiTokenHandler(FakeTransaction(missing), lambda: NOW).execute(
+                RevokeApiTokenCommand(token_id)
+            )
         )
         is False
     )
@@ -194,7 +206,9 @@ def test_revoke_api_token_is_idempotent_and_audits_only_first_revoke():
     repository = FakeRepository(token=existing)
     assert (
         asyncio.run(
-            RevokeApiTokenHandler(repository, lambda: NOW).execute(RevokeApiTokenCommand(token_id))
+            RevokeApiTokenHandler(FakeTransaction(repository), lambda: NOW).execute(
+                RevokeApiTokenCommand(token_id)
+            )
         )
         is True
     )
@@ -209,7 +223,9 @@ def test_revoke_api_token_is_idempotent_and_audits_only_first_revoke():
     repository.token = ApiTokenStatus(token_id, existing.user_id, existing.project_id, NOW)
     assert (
         asyncio.run(
-            RevokeApiTokenHandler(repository, lambda: NOW).execute(RevokeApiTokenCommand(token_id))
+            RevokeApiTokenHandler(FakeTransaction(repository), lambda: NOW).execute(
+                RevokeApiTokenCommand(token_id)
+            )
         )
         is True
     )

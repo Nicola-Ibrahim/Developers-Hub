@@ -9,7 +9,6 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from conftest import migration_config
-from devops_platform.application.project_registration.command import RegisterProjectCommand
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, inspect, select, text
 from sqlalchemy.exc import IntegrityError
@@ -20,16 +19,16 @@ from sqlalchemy.pool import NullPool
 from api.app import create_app
 from composition.container import BackendContainer
 from composition.integrations.project_registration import RegisterProjectCommandHandler
-from devops_platform.infra.persistence.models import Resource
-from identity.application.issue_api_token.command import IssueApiTokenCommand
+from devops_platform.application.projects.command import RegisterProjectCommand
+from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
+from devops_platform.infra.persistence.models.resources import Resource
+from identity.application.api_tokens.issue_api_token.command import IssueApiTokenCommand
+from identity.application.api_tokens.revoke_api_token.command import RevokeApiTokenCommand
+from identity.application.api_tokens.revoke_api_token.handler import RevokeApiTokenHandler
 from identity.application.shared.errors import CredentialDeliveryError
-from identity.infra.hosts.api_token_operations import IssueApiTokenToFile, RevokeApiTokenOperation
-from identity.infra.persistence.models import (
-    ApiAccessTokenRow,
-    InternalUserRow,
-    ProjectMembershipRow,
-    ProjectRow,
-)
+from identity.infra.composition.api_token_transactions import IssueApiTokenToFile
+from identity.infra.persistence.models.api_token import ApiAccessTokenRow
+from identity.infra.persistence.models.user import InternalUserRow
 from identity.infra.security.credential_file import PrivateCredentialFile
 from migrations.metadata import registered_metadata
 from shared.infra.persistence.audit import AuditEvent
@@ -123,8 +122,8 @@ async def revoke_with_container(database: AsyncEngine, token_id, config):
     container = BackendContainer(config, engine=database).combined()
     try:
         async with container() as scope:
-            service = await scope.get(RevokeApiTokenOperation)
-            return await service.execute(token_id)
+            service = await scope.get(RevokeApiTokenHandler)
+            return await service.execute(RevokeApiTokenCommand(token_id))
     finally:
         await container.close()
 
@@ -292,8 +291,8 @@ def test_pre_refactor_token_digest_still_authenticates(postgres_engine, tmp_path
 
 def test_disabled_issuance_rolls_back_membership_for_registered_project(postgres_engine, tmp_path):
     token_id, _ = issue(postgres_engine, tmp_path / "credential")
+    from devops_platform.infra.persistence.models.project_access import ProjectRow
     from identity.domain.errors import IdentityValidationError
-    from identity.infra.persistence.models import ProjectRow
 
     with Session(postgres_engine) as session, session.begin():
         session.get(
@@ -317,13 +316,3 @@ def test_revoke_is_idempotent_and_does_not_duplicate_audit(postgres_engine, tmp_
     assert not revoke(postgres_engine, uuid4())
     with Session(postgres_engine) as session:
         assert session.scalar(select(func.count()).select_from(AuditEvent)) == 2
-
-
-                "repository, configured FROM project_registrations WHERE project_id = :id"
-            ),
-            {"id": project_id},
-        ).one()
-        assert tuple(row) == (project_id, "legacy-project", None, None, None, False)
-        assert connection.scalar(text("SELECT count(*) FROM project_environments")) == 0
-        assert connection.scalar(text("SELECT count(*) FROM teams")) == 0
-        assert compare_metadata(MigrationContext.configure(connection), registered_metadata()) == []

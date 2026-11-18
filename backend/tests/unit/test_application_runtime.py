@@ -8,13 +8,13 @@ import types
 from uuid import uuid4
 
 import pytest
-from devops_platform.application.application_delivery.shared.ports import (
-    ApplicationDeliveryFailure,
-)
 from psycopg.conninfo import conninfo_to_dict
 
-from devops_platform.application.workload_delivery.shared.database_binding import (
+from devops_platform.application.software_delivery.shared.database_binding import (
     ApplicationDatabaseBinding,
+)
+from devops_platform.application.software_delivery.shared.ports import (
+    ApplicationDeliveryFailure,
 )
 from devops_platform.infra.providers.docker_application import DockerApplicationAdapter
 

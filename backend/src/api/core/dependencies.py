@@ -13,11 +13,9 @@ from api.core.security.request_identity import (
 from api.identity.principal.schemas import PrincipalView
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import PlatformRequestError
-from identity.application.authenticate_api_token.query import (
-    AuthenticateApiTokenQuery,
-)
-from identity.application.authenticate_session.query import AuthenticateSessionQuery
-from identity.application.module import IdentityModule
+from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
+from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
+from identity.application.interfaces.dispatch import IdentityModule
 
 
 @inject

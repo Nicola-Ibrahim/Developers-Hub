@@ -6,66 +6,68 @@ from pathlib import Path
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from devops_platform.application.workload_delivery.attach_database.handler import (
-    AttachApplicationResourceHandler,
-)
-from devops_platform.application.workload_delivery.attach_database.port import (
-    ApplicationResourceAttachmentRepository,
-)
-from devops_platform.application.workload_delivery.create_local_preview.handler import (
-    CreateLocalPreviewHandler,
-)
-from devops_platform.application.workload_delivery.create_local_preview.port import (
-    LocalPreviewRepository,
-)
-from devops_platform.application.workload_delivery.create_workload.handler import (
+from devops_platform.application.applications.create_application.handler import (
     CreateApplicationHandler,
 )
-from devops_platform.application.workload_delivery.create_workload.port import (
+from devops_platform.application.applications.create_application.port import (
     ApplicationCreationRepository,
 )
-from devops_platform.application.workload_delivery.deploy_workload.handler import (
-    DeployApplicationHandler,
-)
-from devops_platform.application.workload_delivery.deploy_workload.port import (
-    ApplicationDeploymentRepository,
-)
-from devops_platform.application.workload_delivery.handle_preview_webhook.handler import (
-    ProcessGithubPreviewWebhookHandler,
-)
-from devops_platform.application.workload_delivery.handle_preview_webhook.port import (
-    PreviewWebhookRepository,
-)
-from devops_platform.application.workload_delivery.read_templates.handler import (
-    ReadTemplatesHandler,
-)
-from devops_platform.application.workload_delivery.read_workloads.handler import (
+from devops_platform.application.applications.read_applications.handler import (
     ReadApplicationHandler,
     ReadApplicationsHandler,
     ReadDeploymentHistoryHandler,
 )
-from devops_platform.application.workload_delivery.read_workloads.port import (
+from devops_platform.application.applications.read_applications.port import (
     ApplicationReadRepository,
 )
-from devops_platform.application.workload_delivery.retry_delivery_step.handler import (
+from devops_platform.application.applications.read_templates.handler import (
+    ReadTemplatesHandler,
+)
+from devops_platform.application.software_delivery.attach_database.handler import (
+    AttachApplicationResourceHandler,
+)
+from devops_platform.application.software_delivery.attach_database.port import (
+    ApplicationResourceAttachmentRepository,
+)
+from devops_platform.application.software_delivery.create_local_preview.handler import (
+    CreateLocalPreviewHandler,
+)
+from devops_platform.application.software_delivery.create_local_preview.port import (
+    LocalPreviewRepository,
+)
+from devops_platform.application.software_delivery.deploy_application.handler import (
+    DeployApplicationHandler,
+)
+from devops_platform.application.software_delivery.deploy_application.port import (
+    ApplicationDeploymentRepository,
+)
+from devops_platform.application.software_delivery.handle_preview_webhook.handler import (
+    ProcessGithubPreviewWebhookHandler,
+)
+from devops_platform.application.software_delivery.handle_preview_webhook.port import (
+    PreviewWebhookRepository,
+)
+from devops_platform.application.software_delivery.retry_delivery_step.handler import (
     RetryDeliveryStepHandler,
 )
-from devops_platform.application.workload_delivery.retry_delivery_step.port import (
+from devops_platform.application.software_delivery.retry_delivery_step.port import (
     DeliveryRetryRepository,
 )
-from devops_platform.application.workload_delivery.shared.database_binding import (
+from devops_platform.application.software_delivery.shared.database_binding import (
     ApplicationDatabaseBindingResolver,
 )
-from devops_platform.application.workload_delivery.shared.ports import (
+from devops_platform.application.software_delivery.shared.ports import (
     ApprovedImageCatalog,
     RequestFingerprint,
     TemplateCatalog,
     WebhookSignatureVerifier,
 )
-from devops_platform.infra.persistence.application_bindings import (
+from devops_platform.infra.composition.application_bindings import (
     SQLAlchemyApplicationDatabaseBindings,
 )
-from devops_platform.infra.persistence.delivery import SQLAlchemyApplicationDeliveryRepository
+from devops_platform.infra.persistence.repositories.delivery import (
+    SQLAlchemyApplicationDeliveryRepository,
+)
 from devops_platform.infra.providers.docker_application import DockerApplicationAdapter
 from devops_platform.infra.providers.github import GitHubRepositoryAdapter
 from devops_platform.infra.security.approval import StaticApprovedImageCatalog

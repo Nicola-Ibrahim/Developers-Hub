@@ -2,9 +2,6 @@ import asyncio
 from uuid import uuid4
 
 import pytest
-from devops_platform.application.resource_requests.submit_database_request.result import (
-    AcceptedDatabaseRequest,
-)
 from dishka import Provider, Scope, provide
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
@@ -12,16 +9,19 @@ from test_operation_lifecycle import CapturedResponses, FakeSession
 
 from api.app import create_app
 from composition.container import BackendContainer
-from devops_platform.application.database_provisioning.read_resources.handler import (
+from devops_platform.application.resource_management.read_resources.handler import (
     ReadResourcesHandler,
 )
-from devops_platform.application.database_provisioning.submit_database_request.handler import (
+from devops_platform.application.resource_management.submit_database_request.handler import (
     RequestTemporaryDatabaseHandler,
+)
+from devops_platform.application.resource_management.submit_database_request.result import (
+    AcceptedDatabaseRequest,
 )
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import PlatformRequestError
-from identity.application.authenticate_api_token.query import AuthenticateApiTokenQuery
-from identity.application.module import IdentityModule
+from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
+from identity.application.interfaces.dispatch import IdentityModule
 from identity.contracts import AuthenticatedPrincipal
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
