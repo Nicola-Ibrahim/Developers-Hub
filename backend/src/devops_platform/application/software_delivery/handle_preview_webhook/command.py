@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from devops_platform.application.software_delivery.shared.models import WebhookResult
 from shared.dispatch import Command
@@ -10,3 +11,4 @@ class ProcessGithubPreviewWebhook(Command[WebhookResult]):
     signature: str | None = field(repr=False)
     delivery_id: str | None
     event: str | None
+    now: datetime

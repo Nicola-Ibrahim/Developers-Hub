@@ -4,7 +4,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from devops_platform.application.resource_management.ports import (
+from devops_platform.application.interfaces.resources import (
     DatabaseCredentials,
     DatabaseEndpoint,
     DeletionObservation,

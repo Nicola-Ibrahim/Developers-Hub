@@ -1,22 +1,17 @@
 """Queue an approved immutable image for application deployment."""
 
-from collections.abc import Callable
-from datetime import datetime
-
+from devops_platform.application.interfaces.software_delivery import (
+    ApplicationDeploymentRepository,
+    ApprovedImageCatalog,
+    RequestFingerprint,
+)
 from devops_platform.application.shared.errors import PlatformRequestError
 from devops_platform.application.software_delivery.deploy_application.command import (
     DeployApplication,
 )
-from devops_platform.application.software_delivery.deploy_application.port import (
-    ApplicationDeploymentRepository,
-)
 from devops_platform.application.software_delivery.shared.models import DeploymentDetails
 from devops_platform.application.software_delivery.shared.policy import (
     validate_delivery_key,
-)
-from devops_platform.application.software_delivery.shared.ports import (
-    ApprovedImageCatalog,
-    RequestFingerprint,
 )
 from devops_platform.domain.errors import DomainError
 from devops_platform.domain.value_objects.image_digest import ImageDigest
@@ -28,10 +23,9 @@ class DeployApplicationHandler:
         repository: ApplicationDeploymentRepository,
         images: ApprovedImageCatalog,
         fingerprint: RequestFingerprint,
-        clock: Callable[[], datetime],
     ) -> None:
         self.repository, self.images = repository, images
-        self.fingerprint, self.clock = fingerprint, clock
+        self.fingerprint = fingerprint
 
     async def execute(self, message: DeployApplication) -> DeploymentDetails:
         access, application_id, command = message.access, message.application_id, message.request
@@ -60,5 +54,5 @@ class DeployApplicationHandler:
             command,
             message.idempotency_key,
             self.fingerprint.for_value(command),
-            self.clock(),
+            message.now,
         )

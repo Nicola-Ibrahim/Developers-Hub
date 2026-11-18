@@ -13,18 +13,19 @@ from api.core.security.request_identity import BrowserRequestCredentials, Reques
 from devops_platform.application.applications.create_application.command import (
     CreateApplication,
 )
-from devops_platform.application.applications.read_applications.query import (
+from devops_platform.application.applications.get_application.query import (
     ReadApplication,
+)
+from devops_platform.application.applications.list_applications.query import (
     ReadApplications,
-    ReadDeploymentHistory,
 )
 from devops_platform.application.applications.read_templates.query import ReadTemplates
-from devops_platform.application.module import DeveloperPlatformModule
-from devops_platform.application.project_access.manage_project_membership import (
-    ListProjectMembers,
+from devops_platform.application.interfaces.module import DeveloperPlatformModule
+from devops_platform.application.project_access.list_project_members.query import ListProjectMembers
+from devops_platform.application.project_access.manage_project_membership.command import (
     ManageProjectMembership,
 )
-from devops_platform.application.resource_management.read_resources.query import (
+from devops_platform.application.projects.list_projects.query import (
     ReadProjects,
 )
 from devops_platform.application.shared.dto import AccessContext
@@ -35,6 +36,9 @@ from devops_platform.application.software_delivery.deploy_application.command im
 )
 from devops_platform.application.software_delivery.handle_preview_webhook.command import (
     ProcessGithubPreviewWebhook,
+)
+from devops_platform.application.software_delivery.read_deployment_history.query import (
+    ReadDeploymentHistory,
 )
 from devops_platform.application.software_delivery.retry_delivery_step.command import (
     RetryDeliveryStep,

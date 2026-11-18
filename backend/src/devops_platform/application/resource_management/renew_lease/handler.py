@@ -1,9 +1,9 @@
-from devops_platform.application.resource_management.renew_lease.command import (
-    RenewDatabase,
-)
-from devops_platform.application.shared.resource_repository import (
+from devops_platform.application.interfaces.resources import (
     ResourceRepository,
     ResourceSnapshot,
+)
+from devops_platform.application.resource_management.renew_lease.command import (
+    RenewDatabase,
 )
 
 

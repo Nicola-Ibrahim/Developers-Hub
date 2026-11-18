@@ -7,7 +7,7 @@ import pytest
 from starlette.requests import Request
 
 from api.platform.module import PlatformRequestModule
-from devops_platform.application.resource_management.read_resources.query import (
+from devops_platform.application.resource_management.get_resource.query import (
     ReadResource,
 )
 from devops_platform.application.shared.errors import CatalogForbidden

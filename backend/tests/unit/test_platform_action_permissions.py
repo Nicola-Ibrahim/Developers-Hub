@@ -7,13 +7,15 @@ from uuid import UUID, uuid4
 import pytest
 
 from devops_platform.application.applications.read_templates.query import ReadTemplates
+from devops_platform.application.projects.get_project.query import (
+    ReadProject,
+)
+from devops_platform.application.projects.list_projects.query import (
+    ReadProjects,
+)
 from devops_platform.application.resource_management.catalog.query import ReadCatalog
 from devops_platform.application.resource_management.read_connection.query import (
     ReadDatabaseConnection,
-)
-from devops_platform.application.resource_management.read_resources.query import (
-    ReadProject,
-    ReadProjects,
 )
 from devops_platform.application.shared.errors import CatalogForbidden, PlatformRequestError
 from devops_platform.application.software_delivery.handle_preview_webhook.command import (

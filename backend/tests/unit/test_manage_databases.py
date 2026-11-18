@@ -5,7 +5,10 @@ from uuid import uuid4
 
 import pytest
 
-from devops_platform.application.resource_management.ports import DatabaseCredentials
+from devops_platform.application.interfaces.resources import (
+    DatabaseCredentials,
+    ResourceConnectionSecret,
+)
 from devops_platform.application.resource_management.read_connection.handler import (
     GetDatabaseConnectionQueryHandler,
 )
@@ -14,7 +17,6 @@ from devops_platform.application.resource_management.read_connection.query impor
 )
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import CatalogForbidden, PlatformRequestError
-from devops_platform.application.shared.resource_repository import ResourceConnectionSecret
 from devops_platform.authorization import authorize_platform_action
 
 

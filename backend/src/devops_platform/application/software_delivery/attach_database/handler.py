@@ -1,20 +1,17 @@
 """Request a database attachment for a registered application."""
 
-from collections.abc import Callable
-from datetime import datetime
-
+from devops_platform.application.interfaces.software_delivery import (
+    ApplicationResourceAttachmentRepository,
+    RequestFingerprint,
+)
 from devops_platform.application.shared.errors import PlatformRequestError
 from devops_platform.application.software_delivery.attach_database.command import (
     AttachDatabase,
-)
-from devops_platform.application.software_delivery.attach_database.port import (
-    ApplicationResourceAttachmentRepository,
 )
 from devops_platform.application.software_delivery.shared.models import DeliveryStepDetails
 from devops_platform.application.software_delivery.shared.policy import (
     validate_delivery_key,
 )
-from devops_platform.application.software_delivery.shared.ports import RequestFingerprint
 from devops_platform.domain.errors import DomainError
 from devops_platform.domain.value_objects.resource_spec import ResourceSpec
 
@@ -24,9 +21,8 @@ class AttachApplicationResourceHandler:
         self,
         repository: ApplicationResourceAttachmentRepository,
         fingerprint: RequestFingerprint,
-        clock: Callable[[], datetime],
     ) -> None:
-        self.repository, self.fingerprint, self.clock = repository, fingerprint, clock
+        self.repository, self.fingerprint = repository, fingerprint
 
     async def execute(self, message: AttachDatabase) -> DeliveryStepDetails:
         access, application_id, command = message.access, message.application_id, message.request
@@ -51,5 +47,5 @@ class AttachApplicationResourceHandler:
             command,
             message.idempotency_key,
             self.fingerprint.for_value(command),
-            self.clock(),
+            message.now,
         )

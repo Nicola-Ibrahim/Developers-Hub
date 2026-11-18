@@ -9,7 +9,7 @@ from test_operation_lifecycle import CapturedResponses, FakeSession
 
 from api.app import create_app
 from composition.container import BackendContainer
-from devops_platform.application.resource_management.read_resources.handler import (
+from devops_platform.application.resource_management.list_resources.handler import (
     ReadResourcesHandler,
 )
 from devops_platform.application.resource_management.submit_database_request.handler import (

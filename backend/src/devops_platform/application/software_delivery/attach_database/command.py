@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from devops_platform.application.software_delivery.shared.models import DeliveryStepDetails
@@ -21,3 +22,4 @@ class AttachDatabase(Command[DeliveryStepDetails]):
     application_id: UUID
     request: ResourceAttachmentSpec
     idempotency_key: str
+    now: datetime

@@ -5,7 +5,7 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from uuid import UUID
 
-from devops_platform.application.resource_management.ports import (
+from devops_platform.application.interfaces.resources import (
     LocalDatabaseProvider,
     ProviderFailure,
     ProvisioningJob,

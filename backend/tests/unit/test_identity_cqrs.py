@@ -4,10 +4,14 @@ from uuid import uuid4
 
 import pytest
 
-from devops_platform.application.project_access.manage_project_membership import (
-    ListProjectMembers,
+from devops_platform.application.project_access.list_project_members.handler import (
     ListProjectMembersHandler,
+)
+from devops_platform.application.project_access.list_project_members.query import ListProjectMembers
+from devops_platform.application.project_access.manage_project_membership.command import (
     ManageProjectMembership,
+)
+from devops_platform.application.project_access.manage_project_membership.handler import (
     ManageProjectMembershipHandler,
 )
 from devops_platform.application.shared.dto import AccessContext
@@ -63,12 +67,13 @@ def test_membership_command_validates_project_role_before_persistence() -> None:
     actor_id, project_id = uuid4(), uuid4()
     with pytest.raises(InvalidProjectRole, match="role"):
         asyncio.run(
-            ManageProjectMembershipHandler(Repository(), lambda: NOW).execute(
+            ManageProjectMembershipHandler(Repository()).execute(
                 ManageProjectMembership(
                     AccessContext(actor_id, project_id, "admin", frozenset({"resources:write"})),
                     project_id,
                     uuid4(),
                     "owner",
+                    NOW,
                 )
             )
         )

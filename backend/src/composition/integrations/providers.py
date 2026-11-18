@@ -10,12 +10,10 @@ from composition.integrations.project_access_persistence import (
     project_access_repository_for_session,
 )
 from composition.integrations.project_registration import RegisterProjectCommandHandler
-from devops_platform.application.project_access.manage_project_membership import (
-    ProjectAccessRepository,
-)
+from devops_platform.application.interfaces.project_access import ProjectAccessRepository
+from devops_platform.application.interfaces.software_delivery import ResourceProvisioner
 from devops_platform.application.projects.handler import RegisterProjectHandler
 from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
-from devops_platform.application.software_delivery.shared.ports import ResourceProvisioner
 from devops_platform.domain.interfaces.project_access_directory import ProjectAccessDirectory
 from identity.application.interfaces.browser_transactions import BrowserTransaction
 from identity.infra.composition.browser_transactions import SqlAlchemyIdentityTransaction

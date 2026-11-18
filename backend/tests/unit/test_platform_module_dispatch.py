@@ -5,14 +5,15 @@ import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from composition.container import BackendContainer
+from devops_platform.application.interfaces.resources import ResourceRepository
+from devops_platform.application.resource_management.list_resources.handler import (
+    ReadResourcesHandler,
+)
 from devops_platform.application.resource_management.read_activity.handler import (
     ListResourceActivityQueryHandler,
 )
 from devops_platform.application.resource_management.read_connection.handler import (
     GetDatabaseConnectionQueryHandler,
-)
-from devops_platform.application.resource_management.read_resources.handler import (
-    ReadResourcesHandler,
 )
 from devops_platform.application.resource_management.renew_lease.handler import (
     RenewDatabaseLeaseHandler,
@@ -20,7 +21,6 @@ from devops_platform.application.resource_management.renew_lease.handler import 
 from devops_platform.application.resource_management.submit_database_request.handler import (
     RequestTemporaryDatabaseHandler,
 )
-from devops_platform.application.shared.resource_repository import ResourceRepository
 from devops_platform.authorization import ACTION_PERMISSIONS
 from devops_platform.infra.composition.module import PLATFORM_HANDLER_REGISTRY
 from shared.infra.settings import Settings

@@ -9,58 +9,48 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from devops_platform.application.applications.create_application.handler import (
     CreateApplicationHandler,
 )
-from devops_platform.application.applications.create_application.port import (
-    ApplicationCreationRepository,
-)
-from devops_platform.application.applications.read_applications.handler import (
+from devops_platform.application.applications.get_application.handler import (
     ReadApplicationHandler,
-    ReadApplicationsHandler,
-    ReadDeploymentHistoryHandler,
 )
-from devops_platform.application.applications.read_applications.port import (
-    ApplicationReadRepository,
+from devops_platform.application.applications.list_applications.handler import (
+    ReadApplicationsHandler,
 )
 from devops_platform.application.applications.read_templates.handler import (
     ReadTemplatesHandler,
 )
+from devops_platform.application.interfaces.applications import (
+    ApplicationCreationRepository,
+    ApplicationReadRepository,
+)
+from devops_platform.application.interfaces.software_delivery import (
+    ApplicationDatabaseBindingResolver,
+    ApplicationDeploymentRepository,
+    ApplicationResourceAttachmentRepository,
+    ApprovedImageCatalog,
+    DeliveryRetryRepository,
+    LocalPreviewRepository,
+    PreviewWebhookRepository,
+    RequestFingerprint,
+    TemplateCatalog,
+    WebhookSignatureVerifier,
+)
 from devops_platform.application.software_delivery.attach_database.handler import (
     AttachApplicationResourceHandler,
-)
-from devops_platform.application.software_delivery.attach_database.port import (
-    ApplicationResourceAttachmentRepository,
 )
 from devops_platform.application.software_delivery.create_local_preview.handler import (
     CreateLocalPreviewHandler,
 )
-from devops_platform.application.software_delivery.create_local_preview.port import (
-    LocalPreviewRepository,
-)
 from devops_platform.application.software_delivery.deploy_application.handler import (
     DeployApplicationHandler,
-)
-from devops_platform.application.software_delivery.deploy_application.port import (
-    ApplicationDeploymentRepository,
 )
 from devops_platform.application.software_delivery.handle_preview_webhook.handler import (
     ProcessGithubPreviewWebhookHandler,
 )
-from devops_platform.application.software_delivery.handle_preview_webhook.port import (
-    PreviewWebhookRepository,
+from devops_platform.application.software_delivery.read_deployment_history.handler import (
+    ReadDeploymentHistoryHandler,
 )
 from devops_platform.application.software_delivery.retry_delivery_step.handler import (
     RetryDeliveryStepHandler,
-)
-from devops_platform.application.software_delivery.retry_delivery_step.port import (
-    DeliveryRetryRepository,
-)
-from devops_platform.application.software_delivery.shared.database_binding import (
-    ApplicationDatabaseBindingResolver,
-)
-from devops_platform.application.software_delivery.shared.ports import (
-    ApprovedImageCatalog,
-    RequestFingerprint,
-    TemplateCatalog,
-    WebhookSignatureVerifier,
 )
 from devops_platform.infra.composition.application_bindings import (
     SQLAlchemyApplicationDatabaseBindings,
@@ -75,7 +65,6 @@ from devops_platform.infra.security.credentials import FernetResourceCredentialC
 from devops_platform.infra.security.fingerprint import Sha256RequestFingerprint
 from devops_platform.infra.security.webhooks import HmacGitHubWebhookVerifier
 from devops_platform.infra.templates.catalog import FilesystemTemplateCatalog
-from shared.infra.clock import Clock
 from shared.infra.settings import Settings
 
 
@@ -207,14 +196,12 @@ class ApplicationDeliveryProvider(Provider):
     def process_preview_webhook_handler(
         self,
         repository: PreviewWebhookRepository,
-        clock: Clock,
         images: ApprovedImageCatalog,
         verifier: WebhookSignatureVerifier | None,
         settings: Settings,
     ) -> ProcessGithubPreviewWebhookHandler:
         return ProcessGithubPreviewWebhookHandler(
             repository,
-            clock,
             images,
             verifier,
             settings.github_allowed_repository_owner,

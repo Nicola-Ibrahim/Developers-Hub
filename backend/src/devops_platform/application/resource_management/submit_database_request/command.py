@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from devops_platform.application.resource_management.submit_database_request.result import (
@@ -25,3 +26,4 @@ class RequestTemporaryDatabase(Command[AcceptedDatabaseRequest]):
     access: AccessContext
     request: DatabaseRequest
     idempotency_key: str
+    now: datetime

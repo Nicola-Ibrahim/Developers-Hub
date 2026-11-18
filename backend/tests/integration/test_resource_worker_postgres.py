@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for
 
-from devops_platform.application.resource_management.ports import (
+from devops_platform.application.interfaces.resources import (
     DatabaseCredentials,
     DatabaseEndpoint,
     DeletionObservation,

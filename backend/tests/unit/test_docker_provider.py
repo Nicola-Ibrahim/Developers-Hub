@@ -10,7 +10,7 @@ import docker
 import pytest
 
 import devops_platform.infra.providers.docker_postgres as docker_provider
-from devops_platform.application.resource_management.ports import (
+from devops_platform.application.interfaces.resources import (
     DatabaseCredentials,
     DatabaseEndpoint,
     ProviderFailure,

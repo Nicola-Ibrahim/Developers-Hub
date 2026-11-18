@@ -10,13 +10,13 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 from uuid import UUID
 
-from devops_platform.application.software_delivery.shared.database_binding import (
-    ApplicationDatabaseBinding,
+from devops_platform.application.interfaces.software_delivery import (
     ApplicationDatabaseBindingResolver,
-)
-from devops_platform.application.software_delivery.shared.ports import (
     ApplicationDeliveryFailure,
     ApplicationDeployer,
+)
+from devops_platform.application.software_delivery.shared.database_binding import (
+    ApplicationDatabaseBinding,
 )
 
 _T = TypeVar("_T")

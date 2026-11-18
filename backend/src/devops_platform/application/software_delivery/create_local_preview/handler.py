@@ -1,19 +1,16 @@
-from collections.abc import Callable
-from datetime import datetime
-
+from devops_platform.application.interfaces.software_delivery import (
+    LocalPreviewRepository,
+    RequestFingerprint,
+)
 from devops_platform.application.shared.errors import PlatformRequestError
 from devops_platform.application.software_delivery.create_local_preview.command import (
     CreateLocalPreview,
-)
-from devops_platform.application.software_delivery.create_local_preview.port import (
-    LocalPreviewRepository,
 )
 from devops_platform.application.software_delivery.shared.models import WorkloadDetails
 from devops_platform.application.software_delivery.shared.policy import (
     APP_NAME,
     validate_delivery_key,
 )
-from devops_platform.application.software_delivery.shared.ports import RequestFingerprint
 
 
 class CreateLocalPreviewHandler:
@@ -21,10 +18,9 @@ class CreateLocalPreviewHandler:
         self,
         repository: LocalPreviewRepository,
         fingerprint: RequestFingerprint,
-        clock: Callable[[], datetime],
     ) -> None:
         self.repository = repository
-        self.fingerprint, self.clock = fingerprint, clock
+        self.fingerprint = fingerprint
 
     async def execute(self, message: CreateLocalPreview) -> tuple[WorkloadDetails, bool]:
         request = message.request
@@ -38,5 +34,5 @@ class CreateLocalPreviewHandler:
             request,
             message.idempotency_key,
             self.fingerprint.for_value(request),
-            self.clock(),
+            message.now,
         )

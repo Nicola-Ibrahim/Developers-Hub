@@ -1,5 +1,6 @@
 """Project membership administration endpoints."""
 
+from datetime import UTC, datetime
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
@@ -9,9 +10,9 @@ from fastapi import APIRouter, Header, Request, Response
 from api.core.security.request_identity import BrowserRequestCredentials
 from api.identity.authentication.credentials import CSRF_HEADER, browser_credentials
 from api.platform.projects.schemas import MembershipBody
-from devops_platform.application.module import DeveloperPlatformModule
-from devops_platform.application.project_access.manage_project_membership import (
-    ListProjectMembers,
+from devops_platform.application.interfaces.module import DeveloperPlatformModule
+from devops_platform.application.project_access.list_project_members.query import ListProjectMembers
+from devops_platform.application.project_access.manage_project_membership.command import (
     ManageProjectMembership,
 )
 from devops_platform.application.shared.dto import AccessContext
@@ -76,7 +77,9 @@ async def set_project_member(
     _csrf: Annotated[str, Header(alias=CSRF_HEADER)],
 ) -> Response:
     access = await project_access(project_id, request)
-    await module.execute(ManageProjectMembership(access, project_id, user_id, body.role))
+    await module.execute(
+        ManageProjectMembership(access, project_id, user_id, body.role, datetime.now(UTC))
+    )
     return Response(status_code=204)
 
 
@@ -90,5 +93,7 @@ async def remove_project_member(
     _csrf: Annotated[str, Header(alias=CSRF_HEADER)],
 ) -> Response:
     access = await project_access(project_id, request)
-    await module.execute(ManageProjectMembership(access, project_id, user_id, None))
+    await module.execute(
+        ManageProjectMembership(access, project_id, user_id, None, datetime.now(UTC))
+    )
     return Response(status_code=204)

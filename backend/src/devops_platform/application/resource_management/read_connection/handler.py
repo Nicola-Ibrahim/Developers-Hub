@@ -1,12 +1,14 @@
 from urllib.parse import quote
 
-from devops_platform.application.resource_management.ports import ResourceCredentialCipher
+from devops_platform.application.interfaces.resources import (
+    ResourceCredentialCipher,
+    ResourceRepository,
+)
 from devops_platform.application.resource_management.read_connection.query import (
     DatabaseConnection,
     ReadDatabaseConnection,
 )
 from devops_platform.application.shared.errors import PlatformRequestError
-from devops_platform.application.shared.resource_repository import ResourceRepository
 
 
 class GetDatabaseConnectionQueryHandler:

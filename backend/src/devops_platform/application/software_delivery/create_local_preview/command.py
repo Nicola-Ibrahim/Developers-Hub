@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from devops_platform.application.software_delivery.shared.models import WorkloadDetails
@@ -18,3 +19,4 @@ class CreateLocalPreview(Command[tuple[WorkloadDetails, bool]]):
     access: AccessContext
     request: LocalPreviewRegistration
     idempotency_key: str
+    now: datetime

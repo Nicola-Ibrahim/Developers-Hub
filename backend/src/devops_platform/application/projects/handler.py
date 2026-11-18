@@ -3,8 +3,8 @@
 import re
 from uuid import UUID
 
+from devops_platform.application.interfaces.projects import ProjectRegistrationRepository
 from devops_platform.application.projects.command import RegisterProjectCommand
-from devops_platform.application.projects.port import ProjectRegistrationRepository
 from devops_platform.application.projects.result import ProjectRegistrationDetails
 from devops_platform.application.shared.errors import PlatformRequestError
 

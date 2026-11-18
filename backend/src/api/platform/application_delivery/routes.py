@@ -1,5 +1,6 @@
 """Application template, creation, deployment and webhook routes."""
 
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -24,13 +25,14 @@ from devops_platform.application.applications.create_application.command import 
     ApplicationRegistration,
     CreateApplication,
 )
-from devops_platform.application.applications.read_applications.query import (
+from devops_platform.application.applications.get_application.query import (
     ReadApplication,
+)
+from devops_platform.application.applications.list_applications.query import (
     ReadApplications,
-    ReadDeploymentHistory,
 )
 from devops_platform.application.applications.read_templates.query import ReadTemplates
-from devops_platform.application.module import DeveloperPlatformModule
+from devops_platform.application.interfaces.module import DeveloperPlatformModule
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.software_delivery.attach_database.command import (
     AttachDatabase,
@@ -46,6 +48,9 @@ from devops_platform.application.software_delivery.deploy_application.command im
 )
 from devops_platform.application.software_delivery.handle_preview_webhook.command import (
     ProcessGithubPreviewWebhook,
+)
+from devops_platform.application.software_delivery.read_deployment_history.query import (
+    ReadDeploymentHistory,
 )
 from devops_platform.application.software_delivery.retry_delivery_step.command import (
     RetryDeliveryStep,
@@ -105,7 +110,7 @@ async def create_application(
     idempotency_key: IdempotencyKey,
 ) -> ApplicationAccepted:
     message = CreateApplication(
-        access, ApplicationRegistration(**body.model_dump()), idempotency_key
+        access, ApplicationRegistration(**body.model_dump()), idempotency_key, datetime.now(UTC)
     )
     authorize_platform_action(message)
     application, replayed = await module.execute(message)
@@ -126,7 +131,7 @@ async def create_local_preview(
     idempotency_key: IdempotencyKey,
 ) -> ApplicationAccepted:
     message = CreateLocalPreview(
-        access, LocalPreviewRegistration(**body.model_dump()), idempotency_key
+        access, LocalPreviewRegistration(**body.model_dump()), idempotency_key, datetime.now(UTC)
     )
     authorize_platform_action(message)
     application, replayed = await module.execute(message)
@@ -176,7 +181,11 @@ async def attach_resource(
     idempotency_key: IdempotencyKey,
 ) -> DeliveryStepView:
     message = AttachDatabase(
-        access, application_id, ResourceAttachmentSpec(**body.model_dump()), idempotency_key
+        access,
+        application_id,
+        ResourceAttachmentSpec(**body.model_dump()),
+        idempotency_key,
+        datetime.now(UTC),
     )
     authorize_platform_action(message)
     step = await module.execute(message)
@@ -198,7 +207,11 @@ async def deploy(
     idempotency_key: IdempotencyKey,
 ) -> DeploymentView:
     message = DeployApplication(
-        access, application_id, DeploymentSpec(**body.model_dump()), idempotency_key
+        access,
+        application_id,
+        DeploymentSpec(**body.model_dump()),
+        idempotency_key,
+        datetime.now(UTC),
     )
     authorize_platform_action(message)
     deployment = await module.execute(message)
@@ -233,7 +246,7 @@ async def retry_step(
     access: PlatformAccess,
     module: FromDishka[DeveloperPlatformModule],
 ) -> DeliveryStepView:
-    message = RetryDeliveryStep(access, application_id, step_id)
+    message = RetryDeliveryStep(access, application_id, step_id, datetime.now(UTC))
     authorize_platform_action(message)
     return _step(await module.execute(message))
 
@@ -253,6 +266,7 @@ async def github_webhook(
         request.headers.get("x-hub-signature-256"),
         request.headers.get("x-github-delivery"),
         request.headers.get("x-github-event"),
+        datetime.now(UTC),
     )
     authorize_platform_action(message)
     result = await module.execute(message)

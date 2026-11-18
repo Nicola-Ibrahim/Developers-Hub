@@ -1,8 +1,8 @@
 """Read the approved application template catalog."""
 
 from devops_platform.application.applications.read_templates.query import ReadTemplates
+from devops_platform.application.interfaces.software_delivery import TemplateCatalog
 from devops_platform.application.software_delivery.shared.models import TemplateVersion
-from devops_platform.application.software_delivery.shared.ports import TemplateCatalog
 
 
 class ReadTemplatesHandler:

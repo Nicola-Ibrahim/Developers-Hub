@@ -1,16 +1,15 @@
 """Accept an idempotent temporary database request."""
 
 from collections.abc import Callable
-from datetime import datetime
 from uuid import UUID, uuid4
 
+from devops_platform.application.interfaces.resources import ResourceRepository
 from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
 from devops_platform.application.resource_management.submit_database_request.command import (
     DatabaseRequest,
     RequestTemporaryDatabase,
 )
 from devops_platform.application.shared.errors import PlatformRequestError
-from devops_platform.application.shared.resource_repository import ResourceRepository
 from devops_platform.domain.aggregates.resource_lifecycle import ResourceLifecycle
 from devops_platform.domain.entities.operation import AcceptedResourceRequest
 from devops_platform.domain.errors import DomainError
@@ -24,13 +23,11 @@ class RequestTemporaryDatabaseHandler:
         self,
         repository: ResourceRepository,
         catalog: ApprovedPostgresCatalog,
-        clock: Callable[[], datetime],
         fingerprint: Callable[[DatabaseRequest], str],
         installation_id: UUID | None,
     ) -> None:
         self.repository = repository
         self.catalog = catalog
-        self.clock = clock
         self.fingerprint = fingerprint
         self.installation_id = installation_id
 
@@ -52,7 +49,6 @@ class RequestTemporaryDatabaseHandler:
             raise PlatformRequestError(
                 "installation_not_configured", "Platform installation is not configured", 503
             )
-        now = self.clock()
         lifecycle = ResourceLifecycle.request(
             resource_id=uuid4(),
             project_id=command.project_id,
@@ -71,7 +67,7 @@ class RequestTemporaryDatabaseHandler:
                 option.max_lifetime_seconds,
                 option.size.storage_enforcement,
             ),
-            now=now,
+            now=message.now,
             ttl_seconds=command.ttl_seconds,
             max_lifetime_seconds=option.max_lifetime_seconds,
         )

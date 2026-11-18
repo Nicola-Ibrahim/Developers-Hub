@@ -13,7 +13,7 @@ from composition.integrations.project_access_persistence import (
     identity_repository_for_session,
     project_access_repository_for_session,
 )
-from devops_platform.application.project_access.manage_membership import set_membership
+from devops_platform.domain.value_objects.project_role import ProjectRole
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
 from identity.application.accounts.complete_password_setup.command import (
     CompletePasswordSetupCommand,
@@ -158,12 +158,12 @@ class IdentityFixture:
 
     async def set_membership(self, actor_id, user_id, project_id, role):
         async with self.sessions() as session, session.begin():
-            await set_membership(
-                project_access_repository_for_session(session),
+            validated_role = ProjectRole.parse(role).value if role is not None else None
+            await project_access_repository_for_session(session).set_membership(
                 actor_id=actor_id,
                 user_id=user_id,
                 project_id=project_id,
-                role=role,
+                role=validated_role,
                 now=self.clock(),
             )
 

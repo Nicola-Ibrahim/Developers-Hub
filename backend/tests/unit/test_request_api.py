@@ -12,18 +12,28 @@ from pydantic import ValidationError
 
 from api.app import create_app
 from api.platform.resources.schemas import AcceptedOperation, ResourceRequest
-from devops_platform.application.module import DeveloperPlatformModule
+from devops_platform.application.interfaces.module import DeveloperPlatformModule
+from devops_platform.application.projects.get_project.query import (
+    ReadProject,
+)
+from devops_platform.application.projects.list_projects.query import (
+    ReadProjects,
+)
 from devops_platform.application.projects.result import (
     EnvironmentDetails,
     ProjectRegistrationDetails,
 )
-from devops_platform.application.resource_management.read_resources.query import (
-    OperationDetails,
+from devops_platform.application.resource_management.get_operation.query import (
     ReadOperation,
-    ReadProject,
-    ReadProjects,
+)
+from devops_platform.application.resource_management.get_resource.query import (
     ReadResource,
+)
+from devops_platform.application.resource_management.list_resources.query import (
     ReadResources,
+)
+from devops_platform.application.resource_management.read_models import (
+    OperationDetails,
     ResourceDetails,
 )
 from devops_platform.application.resource_management.submit_database_request.command import (

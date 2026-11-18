@@ -7,7 +7,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from devops_platform.application.resource_management.read_resources.query import (
+from devops_platform.application.interfaces.resources import (
+    ResourceActivity,
+    ResourceConnectionSecret,
+    ResourceRepository,
+    ResourceSnapshot,
+)
+from devops_platform.application.resource_management.read_models import (
     OperationDetails,
     ResourceDetails,
 )
@@ -16,12 +22,6 @@ from devops_platform.application.shared.errors import (
     PlatformRequestError,
     ledger_unavailable,
     resource_not_found,
-)
-from devops_platform.application.shared.resource_repository import (
-    ResourceActivity,
-    ResourceConnectionSecret,
-    ResourceRepository,
-    ResourceSnapshot,
 )
 from devops_platform.domain.aggregates.resource_lifecycle import ResourceLifecycle
 from devops_platform.domain.entities.operation import AcceptedResourceRequest

@@ -9,8 +9,8 @@ import pytest
 from psycopg.conninfo import conninfo_to_dict
 from sqlalchemy import Select
 
-from devops_platform.application.resource_management.ports import DatabaseCredentials
-from devops_platform.application.software_delivery.shared.ports import (
+from devops_platform.application.interfaces.resources import DatabaseCredentials
+from devops_platform.application.interfaces.software_delivery import (
     ApplicationDeliveryFailure,
 )
 from devops_platform.infra.composition.application_bindings import (

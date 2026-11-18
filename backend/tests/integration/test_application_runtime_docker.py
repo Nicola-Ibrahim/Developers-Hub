@@ -16,11 +16,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for
 
-from devops_platform.application.resource_management.ports import (
+from devops_platform.application.interfaces.resources import (
     DatabaseCredentials,
     ProvisioningJob,
 )
-from devops_platform.application.software_delivery.shared.ports import (
+from devops_platform.application.interfaces.software_delivery import (
     ApplicationDeliveryFailure,
 )
 from devops_platform.infra.composition.application_bindings import (

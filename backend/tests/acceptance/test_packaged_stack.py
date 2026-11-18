@@ -219,11 +219,14 @@ def test_packaged_stack():
             )
             seed_fixture = r"""
 import asyncio, json
+from datetime import UTC, datetime
 from pathlib import Path
 from composition.container import BackendContainer
 from composition.integrations.project_registration import RegisterProjectCommandHandler
-from devops_platform.application.project_access.bootstrap_first_admin import (
+from devops_platform.application.project_access.bootstrap_first_admin.command import (
     BootstrapFirstAdmin,
+)
+from devops_platform.application.project_access.bootstrap_first_admin.handler import (
     BootstrapFirstAdminHandler,
 )
 from identity.application.accounts.create_user.command import CreateUserCommand
@@ -247,7 +250,9 @@ async def seed():
                 Path("/run/platform-secrets/acceptance_password").read_text().strip()
             )
             user_id = await create_user.execute(CreateUserCommand("demo", password))
-            await bootstrap.execute(BootstrapFirstAdmin(user_id, project.project_id))
+            await bootstrap.execute(
+                BootstrapFirstAdmin(user_id, project.project_id, datetime.now(UTC))
+            )
         print(
             json.dumps({"project_id": str(project.project_id), "user_id": str(user_id)})
         )
@@ -276,7 +281,7 @@ asyncio.run(seed())
 import asyncio, secrets
 from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
-from devops_platform.application.resource_management.ports import (
+from devops_platform.application.interfaces.resources import (
     DatabaseCredentials,
     ProvisioningJob,
 )

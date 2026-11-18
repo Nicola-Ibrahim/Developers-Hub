@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 
-from devops_platform.application.software_delivery.shared.ports import (
+from devops_platform.application.interfaces.software_delivery import (
     ApplicationDeliveryFailure,
     TemplateVersion,
 )
@@ -157,7 +157,7 @@ def test_template_update_pr_preserves_user_changes_and_uses_owned_branch(monkeyp
 
     import httpx
 
-    from devops_platform.application.software_delivery.shared.ports import GeneratedFile
+    from devops_platform.application.interfaces.software_delivery import GeneratedFile
     from devops_platform.infra.providers.github import GitHubRepositoryAdapter
 
     def digest(value):

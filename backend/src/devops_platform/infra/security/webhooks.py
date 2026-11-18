@@ -10,16 +10,16 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from devops_platform.application.software_delivery.shared.models import (
-    GeneratedFile,
-    TemplateVersion,
-)
-from devops_platform.application.software_delivery.shared.ports import (
+from devops_platform.application.interfaces.software_delivery import (
     ApplicationDeliveryFailure,
     ApprovedImageCatalog,
     RequestFingerprint,
     TemplateCatalog,
     WebhookSignatureVerifier,
+)
+from devops_platform.application.software_delivery.shared.models import (
+    GeneratedFile,
+    TemplateVersion,
 )
 
 

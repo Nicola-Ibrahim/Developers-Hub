@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from devops_platform.application.software_delivery.shared.models import DeliveryStepDetails
@@ -11,3 +12,4 @@ class RetryDeliveryStep(Command[DeliveryStepDetails]):
     access: AccessContext
     application_id: UUID
     step_id: UUID
+    now: datetime

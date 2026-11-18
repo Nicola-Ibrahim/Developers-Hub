@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from api.app import create_app
 from api.platform.resources.schemas import RenewRequest, ResourceRequest, ResourceView
 from api.settings.config import APISettings, get_api_settings
-from devops_platform.application.module import DeveloperPlatformModule
+from devops_platform.application.interfaces.module import DeveloperPlatformModule
 from devops_platform.application.resource_management.catalog.handler import ReadCatalogQueryHandler
 from devops_platform.application.resource_management.catalog.query import ReadCatalog
 from identity.application.api_tokens.authenticate_api_token.handler import (

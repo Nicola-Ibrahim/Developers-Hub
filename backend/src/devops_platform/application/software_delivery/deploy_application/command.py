@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from devops_platform.application.software_delivery.shared.models import DeploymentDetails
@@ -18,3 +19,4 @@ class DeployApplication(Command[DeploymentDetails]):
     application_id: UUID
     request: DeploymentSpec
     idempotency_key: str
+    now: datetime

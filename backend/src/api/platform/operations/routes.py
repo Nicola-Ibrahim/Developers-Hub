@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends
 
 from api.core.dependencies import platform_access
 from api.platform.operations.schemas import OperationView
-from devops_platform.application.module import DeveloperPlatformModule
-from devops_platform.application.resource_management.read_resources.query import (
+from devops_platform.application.interfaces.module import DeveloperPlatformModule
+from devops_platform.application.resource_management.get_operation.query import (
     ReadOperation,
 )
 from devops_platform.application.shared.dto import AccessContext

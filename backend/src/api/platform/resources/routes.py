@@ -1,6 +1,7 @@
 """Database request, inventory and lifecycle routes."""
 
 from dataclasses import asdict
+from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -18,19 +19,21 @@ from api.platform.resources.schemas import (
     ResourceRequest,
     ResourceView,
 )
-from devops_platform.application.module import DeveloperPlatformModule
+from devops_platform.application.interfaces.module import DeveloperPlatformModule
 from devops_platform.application.resource_management.delete_database.command import (
     DeleteDatabase,
+)
+from devops_platform.application.resource_management.get_resource.query import (
+    ReadResource,
+)
+from devops_platform.application.resource_management.list_resources.query import (
+    ReadResources,
 )
 from devops_platform.application.resource_management.read_activity.query import (
     ReadResourceActivity,
 )
 from devops_platform.application.resource_management.read_connection.query import (
     ReadDatabaseConnection,
-)
-from devops_platform.application.resource_management.read_resources.query import (
-    ReadResource,
-    ReadResources,
 )
 from devops_platform.application.resource_management.renew_lease.command import (
     RenewDatabase,
@@ -58,7 +61,7 @@ async def request_database(
     ],
 ) -> AcceptedOperation:
     message = RequestTemporaryDatabase(
-        access, DatabaseRequest(**command.model_dump()), idempotency_key
+        access, DatabaseRequest(**command.model_dump()), idempotency_key, datetime.now(UTC)
     )
     authorize_platform_action(message)
     result = await module.execute(message)

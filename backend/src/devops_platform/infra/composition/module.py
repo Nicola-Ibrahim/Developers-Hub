@@ -9,25 +9,43 @@ from devops_platform.application.applications.create_application.command import 
 from devops_platform.application.applications.create_application.handler import (
     CreateApplicationHandler,
 )
-from devops_platform.application.applications.read_applications.handler import (
+from devops_platform.application.applications.get_application.handler import (
     ReadApplicationHandler,
-    ReadApplicationsHandler,
-    ReadDeploymentHistoryHandler,
 )
-from devops_platform.application.applications.read_applications.query import (
+from devops_platform.application.applications.get_application.query import (
     ReadApplication,
+)
+from devops_platform.application.applications.list_applications.handler import (
+    ReadApplicationsHandler,
+)
+from devops_platform.application.applications.list_applications.query import (
     ReadApplications,
-    ReadDeploymentHistory,
 )
 from devops_platform.application.applications.read_templates.handler import (
     ReadTemplatesHandler,
 )
 from devops_platform.application.applications.read_templates.query import ReadTemplates
-from devops_platform.application.project_access.manage_project_membership import (
-    ListProjectMembers,
+from devops_platform.application.project_access.list_project_members.handler import (
     ListProjectMembersHandler,
+)
+from devops_platform.application.project_access.list_project_members.query import ListProjectMembers
+from devops_platform.application.project_access.manage_project_membership.command import (
     ManageProjectMembership,
+)
+from devops_platform.application.project_access.manage_project_membership.handler import (
     ManageProjectMembershipHandler,
+)
+from devops_platform.application.projects.get_project.handler import (
+    ReadProjectHandler,
+)
+from devops_platform.application.projects.get_project.query import (
+    ReadProject,
+)
+from devops_platform.application.projects.list_projects.handler import (
+    ReadProjectsHandler,
+)
+from devops_platform.application.projects.list_projects.query import (
+    ReadProjects,
 )
 from devops_platform.application.resource_management.catalog.handler import ReadCatalogQueryHandler
 from devops_platform.application.resource_management.catalog.query import ReadCatalog
@@ -36,6 +54,24 @@ from devops_platform.application.resource_management.delete_database.command imp
 )
 from devops_platform.application.resource_management.delete_database.handler import (
     DeleteTemporaryDatabaseHandler,
+)
+from devops_platform.application.resource_management.get_operation.handler import (
+    ReadOperationHandler,
+)
+from devops_platform.application.resource_management.get_operation.query import (
+    ReadOperation,
+)
+from devops_platform.application.resource_management.get_resource.handler import (
+    ReadResourceHandler,
+)
+from devops_platform.application.resource_management.get_resource.query import (
+    ReadResource,
+)
+from devops_platform.application.resource_management.list_resources.handler import (
+    ReadResourcesHandler,
+)
+from devops_platform.application.resource_management.list_resources.query import (
+    ReadResources,
 )
 from devops_platform.application.resource_management.read_activity.handler import (
     ListResourceActivityQueryHandler,
@@ -48,20 +84,6 @@ from devops_platform.application.resource_management.read_connection.handler imp
 )
 from devops_platform.application.resource_management.read_connection.query import (
     ReadDatabaseConnection,
-)
-from devops_platform.application.resource_management.read_resources.handler import (
-    ReadOperationHandler,
-    ReadProjectHandler,
-    ReadProjectsHandler,
-    ReadResourceHandler,
-    ReadResourcesHandler,
-)
-from devops_platform.application.resource_management.read_resources.query import (
-    ReadOperation,
-    ReadProject,
-    ReadProjects,
-    ReadResource,
-    ReadResources,
 )
 from devops_platform.application.resource_management.renew_lease.command import (
     RenewDatabase,
@@ -96,6 +118,12 @@ from devops_platform.application.software_delivery.handle_preview_webhook.comman
 )
 from devops_platform.application.software_delivery.handle_preview_webhook.handler import (
     ProcessGithubPreviewWebhookHandler,
+)
+from devops_platform.application.software_delivery.read_deployment_history.handler import (
+    ReadDeploymentHistoryHandler,
+)
+from devops_platform.application.software_delivery.read_deployment_history.query import (
+    ReadDeploymentHistory,
 )
 from devops_platform.application.software_delivery.retry_delivery_step.command import (
     RetryDeliveryStep,

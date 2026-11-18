@@ -3,12 +3,20 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TypeVar
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from devops_platform.application.interfaces.software_delivery import (
+    ApplicationDeliveryFailure,
+    ApplicationDeployer,
+    ApprovedImageCatalog,
+    RepositoryProvisioner,
+    ResourceProvisioner,
+    TemplateCatalog,
+)
 from devops_platform.application.shared.errors import PlatformRequestError
 from devops_platform.application.software_delivery.execute_delivery_step.handler import (
     ExecuteDeliveryStepHandler,
@@ -17,14 +25,6 @@ from devops_platform.application.software_delivery.shared.models import (
     DeliveryClaim,
     DeliveryResult,
 )
-from devops_platform.application.software_delivery.shared.ports import (
-    ApplicationDeliveryFailure,
-    ApplicationDeployer,
-    ApprovedImageCatalog,
-    RepositoryProvisioner,
-    ResourceProvisioner,
-    TemplateCatalog,
-)
 from devops_platform.infra.persistence.repositories.delivery import (
     SQLAlchemyApplicationDeliveryRepository,
 )
@@ -32,14 +32,12 @@ from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchem
 
 T = TypeVar("T")
 R = TypeVar("R")
-Clock = Callable[[], datetime]
 
 
 class ApplicationDeliveryHost:
     def __init__(
         self,
         sessions: async_sessionmaker[AsyncSession],
-        clock: Clock,
         templates: TemplateCatalog,
         images: ApprovedImageCatalog,
         repositories: RepositoryProvisioner | None = None,
@@ -50,7 +48,6 @@ class ApplicationDeliveryHost:
     ) -> None:
         self.effect_guard = effect_guard
         self.sessions = sessions
-        self.clock = clock
         self.template_catalog = templates
         self.images = images
         self.repositories = repositories
@@ -58,7 +55,7 @@ class ApplicationDeliveryHost:
         self.deployer = deployer
 
     async def tick(self) -> bool:
-        now = self.clock()
+        now = datetime.now(UTC)
         claim = await self._worker_transaction(
             lambda repo: self._claim(repo, now), lambda result: result
         )
@@ -71,7 +68,7 @@ class ApplicationDeliveryHost:
                     await self._record_failure(claim, "application_busy", True)
                     return True
                 current = await self._worker_transaction(
-                    lambda repo: repo.effect_is_current(claim, self.clock()), bool
+                    lambda repo: repo.effect_is_current(claim, datetime.now(UTC)), bool
                 )
                 if not current:
                     return True
@@ -105,20 +102,20 @@ class ApplicationDeliveryHost:
         while True:
             await asyncio.sleep(8)
             alive = await self._worker_transaction(
-                lambda repo: repo.heartbeat_step(claim, self.clock(), 30), bool
+                lambda repo: repo.heartbeat_step(claim, datetime.now(UTC), 30), bool
             )
             if not alive:
                 return
 
     async def _record_success(self, claim: DeliveryClaim, result: DeliveryResult) -> None:
         await self._worker_transaction(
-            lambda repo: repo.complete_step(claim, result, self.clock()), bool
+            lambda repo: repo.complete_step(claim, result, datetime.now(UTC)), bool
         )
 
     async def _record_failure(self, claim: DeliveryClaim, code: str, retryable: bool) -> None:
         backoff = min(300, 2 ** min(claim.attempts, 8))
         await self._worker_transaction(
-            lambda repo: repo.fail_step(claim, code, self.clock(), backoff, retryable),
+            lambda repo: repo.fail_step(claim, code, datetime.now(UTC), backoff, retryable),
             bool,
         )
 

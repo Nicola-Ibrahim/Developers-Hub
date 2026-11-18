@@ -1,9 +1,9 @@
-from devops_platform.application.resource_management.read_activity.query import (
-    ReadResourceActivity,
-)
-from devops_platform.application.shared.resource_repository import (
+from devops_platform.application.interfaces.resources import (
     ResourceActivity,
     ResourceRepository,
+)
+from devops_platform.application.resource_management.read_activity.query import (
+    ReadResourceActivity,
 )
 
 

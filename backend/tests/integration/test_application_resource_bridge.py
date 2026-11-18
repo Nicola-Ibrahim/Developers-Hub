@@ -10,13 +10,13 @@ from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for, client_for, issue
 
 from composition.integrations.application_resources import LedgerApplicationResources
+from devops_platform.application.interfaces.software_delivery import (
+    ApplicationDeliveryFailure,
+)
 from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
 from devops_platform.application.resource_management.catalog.models import PostgresOption
 from devops_platform.application.software_delivery.attach_database.command import (
     ResourceAttachmentSpec,
-)
-from devops_platform.application.software_delivery.shared.ports import (
-    ApplicationDeliveryFailure,
 )
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow
 from devops_platform.infra.persistence.models.resources import QuotaBudget, Reservation, Resource

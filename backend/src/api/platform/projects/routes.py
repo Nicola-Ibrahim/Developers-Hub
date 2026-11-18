@@ -14,9 +14,11 @@ from api.core.security.request_identity import (
     request_identity,
 )
 from api.platform.projects.schemas import ProjectRegistrationView
-from devops_platform.application.module import DeveloperPlatformModule
-from devops_platform.application.resource_management.read_resources.query import (
+from devops_platform.application.interfaces.module import DeveloperPlatformModule
+from devops_platform.application.projects.get_project.query import (
     ReadProject,
+)
+from devops_platform.application.projects.list_projects.query import (
     ReadProjects,
 )
 from devops_platform.application.shared.dto import AccessContext

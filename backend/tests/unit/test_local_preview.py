@@ -75,11 +75,15 @@ def test_local_preview_authorization_requires_write_scope_and_scoped_project() -
     project_id, actor_id = uuid4(), uuid4()
     request = LocalPreviewRegistration("feature-preview", uuid4(), 600)
     authorized = AccessContext(actor_id, project_id, "developer", frozenset({"resources:write"}))
-    authorize_platform_action(CreateLocalPreview(authorized, request, "preview-key"))
+    authorize_platform_action(
+        CreateLocalPreview(authorized, request, "preview-key", datetime.now(UTC))
+    )
 
     missing_scope = AccessContext(actor_id, project_id, "developer", frozenset())
     with pytest.raises(PlatformRequestError) as forbidden:
-        authorize_platform_action(CreateLocalPreview(missing_scope, request, "preview-key"))
+        authorize_platform_action(
+            CreateLocalPreview(missing_scope, request, "preview-key", datetime.now(UTC))
+        )
     assert (forbidden.value.code, forbidden.value.status) == ("forbidden", 403)
 
     with pytest.raises(PlatformRequestError) as cross_project:
@@ -97,10 +101,12 @@ def test_local_preview_handler_validates_name_ttl_and_persists_replay_identity()
     handler = CreateLocalPreviewHandler(
         repository,
         FakeFingerprint(),
-        lambda: datetime(2026, 1, 1, tzinfo=UTC),
     )
     command = CreateLocalPreview(
-        access, LocalPreviewRegistration("feature-preview", uuid4(), 600), "preview-key"
+        access,
+        LocalPreviewRegistration("feature-preview", uuid4(), 600),
+        "preview-key",
+        datetime(2026, 1, 1, tzinfo=UTC),
     )
     result, replayed = asyncio.run(handler.execute(command))
     assert result[0] == access
@@ -108,7 +114,10 @@ def test_local_preview_handler_validates_name_ttl_and_persists_replay_identity()
     assert result[2] == "preview-key"
     assert not replayed
     invalid = CreateLocalPreview(
-        access, LocalPreviewRegistration("Bad Name", uuid4(), 600), "another-key"
+        access,
+        LocalPreviewRegistration("Bad Name", uuid4(), 600),
+        "another-key",
+        datetime(2026, 1, 1, tzinfo=UTC),
     )
     with pytest.raises(PlatformRequestError) as error:
         asyncio.run(handler.execute(invalid))
@@ -131,11 +140,14 @@ def test_bare_image_id_is_local_only_and_requires_exact_approval() -> None:
         FakeDeploymentRepository(),
         FakeImages({digest}),
         FakeFingerprint(),
-        lambda: datetime.now(UTC),
     )
-    local = DeployApplication(access, uuid4(), DeploymentSpec(digest, "local"), "local-key")
+    local = DeployApplication(
+        access, uuid4(), DeploymentSpec(digest, "local"), "local-key", datetime.now(UTC)
+    )
     assert asyncio.run(handler.execute(local))[2] == local.request
-    remote = DeployApplication(access, uuid4(), DeploymentSpec(digest, "remote"), "remote-key")
+    remote = DeployApplication(
+        access, uuid4(), DeploymentSpec(digest, "remote"), "remote-key", datetime.now(UTC)
+    )
     with pytest.raises(PlatformRequestError) as error:
         asyncio.run(handler.execute(remote))
     assert error.value.code == "immutable_image_required"

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from devops_platform.application.shared.resource_repository import ResourceActivity
+from devops_platform.application.interfaces.resources import ResourceActivity
 from devops_platform.domain.value_objects.access_context import AccessContext
 from shared.dispatch import Query
 

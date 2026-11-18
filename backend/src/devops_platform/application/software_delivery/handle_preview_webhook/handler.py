@@ -1,22 +1,18 @@
 """Validate and record approved GitHub pull-request preview events."""
 
 import re
-from collections.abc import Callable
-from datetime import datetime
 from uuid import UUID
 
+from devops_platform.application.interfaces.software_delivery import (
+    ApprovedImageCatalog,
+    PreviewWebhookRepository,
+    WebhookSignatureVerifier,
+)
 from devops_platform.application.shared.errors import PlatformRequestError
 from devops_platform.application.software_delivery.handle_preview_webhook.command import (
     ProcessGithubPreviewWebhook,
 )
-from devops_platform.application.software_delivery.handle_preview_webhook.port import (
-    PreviewWebhookRepository,
-)
 from devops_platform.application.software_delivery.shared.models import WebhookResult
-from devops_platform.application.software_delivery.shared.ports import (
-    ApprovedImageCatalog,
-    WebhookSignatureVerifier,
-)
 
 _REPOSITORY = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}\Z")
 _DIGEST = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/:@-]{0,250}@sha256:[a-f0-9]{64}\Z")
@@ -30,7 +26,6 @@ class ProcessGithubPreviewWebhookHandler:
     def __init__(
         self,
         repository: PreviewWebhookRepository,
-        clock: Callable[[], datetime],
         images: ApprovedImageCatalog,
         webhook_verifier: WebhookSignatureVerifier | None,
         allowed_repository_owner: str | None,
@@ -38,7 +33,6 @@ class ProcessGithubPreviewWebhookHandler:
         preview_ttl_seconds: int,
     ) -> None:
         self.repository = repository
-        self.clock = clock
         self.images = images
         self.webhook_verifier = webhook_verifier
         self.allowed_repository_owner = allowed_repository_owner
@@ -86,7 +80,7 @@ class ProcessGithubPreviewWebhookHandler:
             repository=repository.casefold(),
             pull_request=number,
             action=action,
-            now=self.clock(),
+            now=command.now,
         )
         if not recorded:
             return WebhookResult(True, True, None, reason="duplicate_delivery")
@@ -95,7 +89,7 @@ class ProcessGithubPreviewWebhookHandler:
             return WebhookResult(False, False, None, reason="repository_not_registered")
         if action == "closed":
             count = await self.repository.close_preview(
-                repository=repository.casefold(), pull_request=number, now=self.clock()
+                repository=repository.casefold(), pull_request=number, now=command.now
             )
             return WebhookResult(True, False, None, cleanup_count=count)
         head = pull_request.get("head")
@@ -146,6 +140,6 @@ class ProcessGithubPreviewWebhookHandler:
             template_id="python-fastapi",
             template_version="1.0.0",
             ttl_seconds=self.preview_ttl_seconds,
-            now=self.clock(),
+            now=command.now,
         )
         return WebhookResult(True, False, application_id)

@@ -115,7 +115,7 @@ def test_duplicate_creation_and_expired_worker_claim_recover(postgres_engine) ->
 def test_preview_close_waits_for_claimed_resource_and_carries_late_resource_id(
     postgres_engine,
 ) -> None:
-    from devops_platform.application.software_delivery.shared.ports import DeliveryResult
+    from devops_platform.application.interfaces.software_delivery import DeliveryResult
     from devops_platform.infra.persistence.models.resources import Resource
 
     user_id, project_id, team_id, environment_id = uuid4(), uuid4(), uuid4(), uuid4()

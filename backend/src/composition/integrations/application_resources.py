@@ -9,6 +9,9 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from devops_platform.application.interfaces.software_delivery import (
+    ApplicationDeliveryFailure,
+)
 from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
 from devops_platform.application.resource_management.submit_database_request.command import (
     DatabaseRequest,
@@ -20,9 +23,6 @@ from devops_platform.application.resource_management.submit_database_request.han
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.software_delivery.attach_database.command import (
     ResourceAttachmentSpec,
-)
-from devops_platform.application.software_delivery.shared.ports import (
-    ApplicationDeliveryFailure,
 )
 from devops_platform.authorization import ALL_SCOPES, authorize_platform_action
 from devops_platform.infra.composition.resource_request_authority import resource_request_role
@@ -63,11 +63,12 @@ class LedgerApplicationResources:
                 command.size_id,
                 command.ttl_seconds,
             )
-            authorize_platform_action(RequestTemporaryDatabase(access, request, idempotency_key))
+            authorize_platform_action(
+                RequestTemporaryDatabase(access, request, idempotency_key, datetime.now(UTC))
+            )
             usecase = RequestTemporaryDatabaseHandler(
                 SQLAlchemyResourceRepository(session),
                 self.catalog,
-                lambda: datetime.now(UTC),
                 lambda value: hashlib.sha256(
                     json.dumps(asdict(value), sort_keys=True, default=str).encode()
                 ).hexdigest(),
@@ -76,7 +77,9 @@ class LedgerApplicationResources:
             # Delivery keys include UUIDs/kinds; hash to the resource API's bounded key contract.
             key = "app:" + hashlib.sha256(idempotency_key.encode()).hexdigest()
             return (
-                await usecase.execute(RequestTemporaryDatabase(access, request, key))
+                await usecase.execute(
+                    RequestTemporaryDatabase(access, request, key, datetime.now(UTC))
+                )
             ).resource_id
 
     async def ready(self, project_id: UUID, resource_id: UUID) -> bool:

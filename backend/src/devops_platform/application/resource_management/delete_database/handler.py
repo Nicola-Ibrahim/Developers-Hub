@@ -1,9 +1,9 @@
 from uuid import UUID
 
+from devops_platform.application.interfaces.resources import ResourceRepository
 from devops_platform.application.resource_management.delete_database.command import (
     DeleteDatabase,
 )
-from devops_platform.application.shared.resource_repository import ResourceRepository
 
 
 class DeleteTemporaryDatabaseHandler:

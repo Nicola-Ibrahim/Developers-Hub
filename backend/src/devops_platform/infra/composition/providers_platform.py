@@ -6,34 +6,47 @@ from dataclasses import asdict
 
 from dishka import Provider, Scope, provide
 
-from devops_platform.application.project_access.bootstrap_first_admin import (
+from devops_platform.application.interfaces.project_access import ProjectAccessRepository
+from devops_platform.application.interfaces.projects import ProjectRegistrationRepository
+from devops_platform.application.interfaces.resources import (
+    ResourceCredentialCipher,
+    ResourceRepository,
+)
+from devops_platform.application.project_access.bootstrap_first_admin.handler import (
     BootstrapFirstAdminHandler,
 )
-from devops_platform.application.project_access.manage_project_membership import (
+from devops_platform.application.project_access.list_project_members.handler import (
     ListProjectMembersHandler,
+)
+from devops_platform.application.project_access.manage_project_membership.handler import (
     ManageProjectMembershipHandler,
-    ProjectAccessRepository,
+)
+from devops_platform.application.projects.get_project.handler import (
+    ReadProjectHandler,
 )
 from devops_platform.application.projects.handler import RegisterProjectHandler
-from devops_platform.application.projects.port import ProjectRegistrationRepository
+from devops_platform.application.projects.list_projects.handler import (
+    ReadProjectsHandler,
+)
 from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
 from devops_platform.application.resource_management.catalog.handler import ReadCatalogQueryHandler
 from devops_platform.application.resource_management.delete_database.handler import (
     DeleteTemporaryDatabaseHandler,
 )
-from devops_platform.application.resource_management.ports import ResourceCredentialCipher
+from devops_platform.application.resource_management.get_operation.handler import (
+    ReadOperationHandler,
+)
+from devops_platform.application.resource_management.get_resource.handler import (
+    ReadResourceHandler,
+)
+from devops_platform.application.resource_management.list_resources.handler import (
+    ReadResourcesHandler,
+)
 from devops_platform.application.resource_management.read_activity.handler import (
     ListResourceActivityQueryHandler,
 )
 from devops_platform.application.resource_management.read_connection.handler import (
     GetDatabaseConnectionQueryHandler,
-)
-from devops_platform.application.resource_management.read_resources.handler import (
-    ReadOperationHandler,
-    ReadProjectHandler,
-    ReadProjectsHandler,
-    ReadResourceHandler,
-    ReadResourcesHandler,
 )
 from devops_platform.application.resource_management.renew_lease.handler import (
     RenewDatabaseLeaseHandler,
@@ -44,7 +57,6 @@ from devops_platform.application.resource_management.submit_database_request.com
 from devops_platform.application.resource_management.submit_database_request.handler import (
     RequestTemporaryDatabaseHandler,
 )
-from devops_platform.application.shared.resource_repository import ResourceRepository
 from devops_platform.domain.interfaces.project_access_directory import ProjectAccessDirectory
 from devops_platform.infra.persistence.repositories.project_access_directory import (
     SQLAlchemyProjectAccessDirectory,
@@ -54,7 +66,6 @@ from devops_platform.infra.persistence.repositories.project_registration import 
 )
 from devops_platform.infra.persistence.repositories.resource import SQLAlchemyResourceRepository
 from devops_platform.infra.security.credentials import FernetResourceCredentialCipher
-from shared.infra.clock import Clock
 from shared.infra.settings import Settings
 
 
@@ -69,9 +80,9 @@ class PlatformProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def manage_project_membership(
-        self, repository: ProjectAccessRepository, clock: Clock
+        self, repository: ProjectAccessRepository
     ) -> ManageProjectMembershipHandler:
-        return ManageProjectMembershipHandler(repository, clock)
+        return ManageProjectMembershipHandler(repository)
 
     project_handler = provide(ReadProjectHandler, scope=Scope.REQUEST)
     projects_handler = provide(ReadProjectsHandler, scope=Scope.REQUEST)
@@ -131,7 +142,6 @@ class PlatformProvider(Provider):
         self,
         repository: ResourceRepository,
         catalog: ApprovedPostgresCatalog,
-        clock: Clock,
         settings: Settings,
     ) -> RequestTemporaryDatabaseHandler:
         def fingerprint(command: DatabaseRequest) -> str:
@@ -141,5 +151,5 @@ class PlatformProvider(Provider):
             return hashlib.sha256(payload.encode()).hexdigest()
 
         return RequestTemporaryDatabaseHandler(
-            repository, catalog, clock, fingerprint, settings.installation_id
+            repository, catalog, fingerprint, settings.installation_id
         )

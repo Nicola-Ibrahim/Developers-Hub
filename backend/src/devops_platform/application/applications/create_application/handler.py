@@ -1,13 +1,14 @@
 """Register a generated application from an approved template."""
 
-from collections.abc import Callable
-from datetime import datetime
-
 from devops_platform.application.applications.create_application.command import (
     CreateApplication,
 )
-from devops_platform.application.applications.create_application.port import (
+from devops_platform.application.interfaces.applications import (
     ApplicationCreationRepository,
+)
+from devops_platform.application.interfaces.software_delivery import (
+    RequestFingerprint,
+    TemplateCatalog,
 )
 from devops_platform.application.shared.errors import PlatformRequestError
 from devops_platform.application.software_delivery.shared.models import WorkloadDetails
@@ -15,10 +16,6 @@ from devops_platform.application.software_delivery.shared.policy import (
     APP_NAME,
     IDENTIFIER,
     validate_delivery_key,
-)
-from devops_platform.application.software_delivery.shared.ports import (
-    RequestFingerprint,
-    TemplateCatalog,
 )
 
 
@@ -28,10 +25,9 @@ class CreateApplicationHandler:
         repository: ApplicationCreationRepository,
         templates: TemplateCatalog,
         fingerprint: RequestFingerprint,
-        clock: Callable[[], datetime],
     ) -> None:
         self.repository, self.templates = repository, templates
-        self.fingerprint, self.clock = fingerprint, clock
+        self.fingerprint = fingerprint
 
     async def execute(self, message: CreateApplication) -> tuple[WorkloadDetails, bool]:
         access, request = message.access, message.request
@@ -46,5 +42,5 @@ class CreateApplicationHandler:
             request,
             message.idempotency_key,
             self.fingerprint.for_value(request),
-            self.clock(),
+            message.now,
         )

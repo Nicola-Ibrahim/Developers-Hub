@@ -6,6 +6,12 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from devops_platform.application.projects.command import RegisterProjectCommand
+from devops_platform.application.projects.get_project.handler import (
+    ReadProjectHandler,
+)
+from devops_platform.application.projects.get_project.query import (
+    ReadProject,
+)
 from devops_platform.application.projects.handler import RegisterProjectHandler
 from devops_platform.application.projects.result import (
     EnvironmentDetails,
@@ -18,18 +24,26 @@ from devops_platform.application.resource_management.catalog.models import (
     ResourceSize,
 )
 from devops_platform.application.resource_management.catalog.query import ReadCatalog
-from devops_platform.application.resource_management.read_resources.handler import (
+from devops_platform.application.resource_management.get_operation.handler import (
     ReadOperationHandler,
-    ReadProjectHandler,
+)
+from devops_platform.application.resource_management.get_operation.query import (
+    ReadOperation,
+)
+from devops_platform.application.resource_management.get_resource.handler import (
     ReadResourceHandler,
+)
+from devops_platform.application.resource_management.get_resource.query import (
+    ReadResource,
+)
+from devops_platform.application.resource_management.list_resources.handler import (
     ReadResourcesHandler,
 )
-from devops_platform.application.resource_management.read_resources.query import (
-    OperationDetails,
-    ReadOperation,
-    ReadProject,
-    ReadResource,
+from devops_platform.application.resource_management.list_resources.query import (
     ReadResources,
+)
+from devops_platform.application.resource_management.read_models import (
+    OperationDetails,
     ResourceDetails,
 )
 from devops_platform.application.resource_management.submit_database_request.command import (
@@ -145,7 +159,7 @@ class RequestApplicationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(hidden.exception.status, 404)
 
         with self.assertRaises(CatalogForbidden) as forbidden:
-            authorize_platform_action(RequestTemporaryDatabase(_access(), _command(), "key"))
+            authorize_platform_action(RequestTemporaryDatabase(_access(), _command(), "key", NOW))
         self.assertEqual(forbidden.exception.code, "forbidden")
 
     async def test_registration_rejects_invalid_registration_values(self) -> None:
@@ -178,12 +192,15 @@ class RequestApplicationTests(unittest.IsolatedAsyncioTestCase):
         repository = FakePlatformLedgerRepository()
         with self.assertRaises(CatalogForbidden):
             authorize_platform_action(
-                RequestTemporaryDatabase(_access(), _command(), "request-key")
+                RequestTemporaryDatabase(_access(), _command(), "request-key", NOW)
             )
         with self.assertRaises(PlatformRequestError) as caught:
             authorize_platform_action(
                 RequestTemporaryDatabase(
-                    _access("resources:write"), _command(project_id=OTHER_PROJECT_ID), "request-key"
+                    _access("resources:write"),
+                    _command(project_id=OTHER_PROJECT_ID),
+                    "request-key",
+                    NOW,
                 )
             )
         self.assertEqual(caught.exception.status, 404)
@@ -194,7 +211,6 @@ class RequestApplicationTests(unittest.IsolatedAsyncioTestCase):
         service = RequestTemporaryDatabaseHandler(
             repository,
             ApprovedPostgresCatalog(),
-            lambda: NOW,
             lambda command: "fingerprint",
             INSTALLATION_ID,
         )
@@ -202,7 +218,7 @@ class RequestApplicationTests(unittest.IsolatedAsyncioTestCase):
         for key, command in invalid:
             with self.subTest(key=key), self.assertRaises(PlatformRequestError) as caught:
                 await service.execute(
-                    RequestTemporaryDatabase(_access("resources:write"), command, key)
+                    RequestTemporaryDatabase(_access("resources:write"), command, key, NOW)
                 )
             self.assertEqual(caught.exception.status, 422)
         self.assertEqual(repository.calls, [])
@@ -212,14 +228,13 @@ class RequestApplicationTests(unittest.IsolatedAsyncioTestCase):
         service = RequestTemporaryDatabaseHandler(
             repository,
             ApprovedPostgresCatalog(),
-            lambda: NOW,
             lambda command: "fingerprint",
             INSTALLATION_ID,
         )
 
         with self.assertRaises(PlatformRequestError) as caught:
             await service.execute(
-                RequestTemporaryDatabase(_access("resources:write"), _command(), "request-key")
+                RequestTemporaryDatabase(_access("resources:write"), _command(), "request-key", NOW)
             )
 
         self.assertEqual(caught.exception.status, 503)
@@ -237,14 +252,13 @@ class RequestApplicationTests(unittest.IsolatedAsyncioTestCase):
         service = RequestTemporaryDatabaseHandler(
             repository,
             ApprovedPostgresCatalog((option,)),
-            lambda: NOW,
             lambda command: "stable-fingerprint",
             INSTALLATION_ID,
         )
 
         result = await service.execute(
             RequestTemporaryDatabase(
-                _access("resources:write"), _command(ttl_seconds=3600), "key-1"
+                _access("resources:write"), _command(ttl_seconds=3600), "key-1", NOW
             )
         )
 
@@ -262,7 +276,6 @@ class RequestApplicationTests(unittest.IsolatedAsyncioTestCase):
         service = RequestTemporaryDatabaseHandler(
             repository,
             ApprovedPostgresCatalog((option,)),
-            lambda: NOW,
             lambda command: "fingerprint",
             INSTALLATION_ID,
         )
@@ -270,7 +283,7 @@ class RequestApplicationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(PlatformRequestError) as caught:
             await service.execute(
                 RequestTemporaryDatabase(
-                    _access("resources:write"), _command(version="99"), "key-1"
+                    _access("resources:write"), _command(version="99"), "key-1", NOW
                 )
             )
 
@@ -284,13 +297,12 @@ class RequestApplicationTests(unittest.IsolatedAsyncioTestCase):
         service = RequestTemporaryDatabaseHandler(
             repository,
             ApprovedPostgresCatalog(),
-            lambda: NOW,
             lambda command: "same-fingerprint",
             INSTALLATION_ID,
         )
 
         result = await service.execute(
-            RequestTemporaryDatabase(_access("resources:write"), _command(), "key-1")
+            RequestTemporaryDatabase(_access("resources:write"), _command(), "key-1", NOW)
         )
 
         self.assertEqual(result, original)
@@ -302,14 +314,13 @@ class RequestApplicationTests(unittest.IsolatedAsyncioTestCase):
         service = RequestTemporaryDatabaseHandler(
             repository,
             ApprovedPostgresCatalog(),
-            lambda: NOW,
             lambda command: "different-fingerprint",
             INSTALLATION_ID,
         )
 
         with self.assertRaises(PlatformRequestError) as caught:
             await service.execute(
-                RequestTemporaryDatabase(_access("resources:write"), _command(), "key-1")
+                RequestTemporaryDatabase(_access("resources:write"), _command(), "key-1", NOW)
             )
 
         self.assertEqual(caught.exception.status, 409)

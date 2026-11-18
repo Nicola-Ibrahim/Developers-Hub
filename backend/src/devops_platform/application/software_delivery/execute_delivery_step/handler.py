@@ -2,20 +2,20 @@
 
 from uuid import UUID
 
-from devops_platform.application.software_delivery.attach_database.command import (
-    ResourceAttachmentSpec,
-)
-from devops_platform.application.software_delivery.shared.models import (
-    DeliveryClaim,
-    DeliveryResult,
-)
-from devops_platform.application.software_delivery.shared.ports import (
+from devops_platform.application.interfaces.software_delivery import (
     ApplicationDeliveryFailure,
     ApplicationDeployer,
     ApprovedImageCatalog,
     RepositoryProvisioner,
     ResourceProvisioner,
     TemplateCatalog,
+)
+from devops_platform.application.software_delivery.attach_database.command import (
+    ResourceAttachmentSpec,
+)
+from devops_platform.application.software_delivery.shared.models import (
+    DeliveryClaim,
+    DeliveryResult,
 )
 
 
