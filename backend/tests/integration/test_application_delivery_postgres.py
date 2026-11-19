@@ -32,7 +32,10 @@ from identity.infra.persistence.models.user import InternalUserRow
 pytestmark = pytest.mark.postgres
 
 
-def test_duplicate_creation_and_expired_worker_claim_recover(postgres_engine) -> None:
+@pytest.mark.parametrize("blocked_steps", [0, 101])
+def test_duplicate_creation_and_expired_worker_claim_recover(
+    postgres_engine, blocked_steps
+) -> None:
     user_id, project_id, team_id, environment_id = uuid4(), uuid4(), uuid4(), uuid4()
     now = datetime.now(UTC)
     project_name = f"delivery-{project_id}"
@@ -80,10 +83,22 @@ def test_duplicate_creation_and_expired_worker_claim_recover(postgres_engine) ->
                 assert replayed_second
                 assert second.id == first.id
             async with sessions() as session, session.begin():
+                session.add_all(
+                    ApplicationDeliveryStepRow(
+                        application_id=first.id,
+                        kind="deployment",
+                        idempotency_key=f"blocked-{index}",
+                        next_attempt_at=now - timedelta(seconds=1),
+                        created_at=now - timedelta(seconds=1),
+                    )
+                    for index in range(blocked_steps)
+                )
+            async with sessions() as session, session.begin():
                 repository = SQLAlchemyApplicationDeliveryRepository(session)
                 first_claim = await repository.claim_step(now, lease_seconds=15)
                 assert first_claim is not None
                 assert first_claim.application_id == first.id
+                assert first_claim.kind == "repository"
             async with sessions() as session, session.begin():
                 repository = SQLAlchemyApplicationDeliveryRepository(session)
                 recovered = await repository.claim_step(now + timedelta(seconds=16), 15)

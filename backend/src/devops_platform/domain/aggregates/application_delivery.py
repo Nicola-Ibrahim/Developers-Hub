@@ -12,16 +12,6 @@ class ApplicationDelivery:
     application: Application
     steps: tuple[DeliveryStep, ...] = ()
 
-    def attach_step(self, step: DeliveryStep) -> "ApplicationDelivery":
-        if self.application.status in {"deleting", "deleted"}:
-            raise DomainError("Application cleanup is in progress or complete.")
-        if any(existing.id == step.id for existing in self.steps):
-            return self
-        return ApplicationDelivery(
-            replace(self.application, status="pending", updated_at=step.updated_at),
-            (*self.steps, step),
-        )
-
     def retry(self, step_id: object, now: datetime) -> "ApplicationDelivery":
         selected = next((step for step in self.steps if step.id == step_id), None)
         if selected is None:

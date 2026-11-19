@@ -7,12 +7,14 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     and_,
+    func,
     or_,
     select,
     update,
 )
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from devops_platform.application.applications.create_application.command import (
     ApplicationRegistration,
@@ -39,7 +41,6 @@ from devops_platform.application.software_delivery.shared.models import (
 from devops_platform.domain.aggregates.application_delivery import ApplicationDelivery
 from devops_platform.domain.entities.application import Application, DeliveryStep
 from devops_platform.domain.errors import DomainError
-from devops_platform.domain.interfaces.application_repository import ApplicationRepository
 from devops_platform.infra.persistence.models.delivery import (
     ApplicationDeliveryIdempotencyRow,
     ApplicationDeliveryStepRow,
@@ -132,60 +133,9 @@ def _domain_step(row: ApplicationDeliveryStepRow) -> DeliveryStep:
     )
 
 
-class SQLAlchemyApplicationDeliveryRepository(ApplicationRepository):
+class SQLAlchemyApplicationDeliveryRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-
-    async def load_for_update(
-        self, project_id: UUID, application_id: UUID
-    ) -> ApplicationDelivery | None:
-        application = await self.session.scalar(
-            select(ApplicationRow)
-            .where(
-                ApplicationRow.id == application_id,
-                ApplicationRow.project_id == project_id,
-            )
-            .with_for_update()
-        )
-        if application is None:
-            return None
-        steps = await self.session.scalars(
-            select(ApplicationDeliveryStepRow)
-            .where(ApplicationDeliveryStepRow.application_id == application_id)
-            .order_by(ApplicationDeliveryStepRow.created_at, ApplicationDeliveryStepRow.id)
-            .with_for_update()
-        )
-        return ApplicationDelivery(
-            _domain_application(application), tuple(_domain_step(step) for step in steps)
-        )
-
-    async def save(self, delivery: ApplicationDelivery) -> None:
-        application = await self.session.scalar(
-            select(ApplicationRow)
-            .where(ApplicationRow.id == delivery.application.id)
-            .with_for_update()
-        )
-        if application is None:
-            raise PlatformRequestError("application_not_found", "Application was not found", 404)
-        application.status = delivery.application.status
-        application.updated_at = delivery.application.updated_at
-        for step in delivery.steps:
-            row = await self.session.scalar(
-                select(ApplicationDeliveryStepRow)
-                .where(
-                    ApplicationDeliveryStepRow.id == step.id,
-                    ApplicationDeliveryStepRow.application_id == application.id,
-                )
-                .with_for_update()
-            )
-            if row is None:
-                raise PlatformRequestError(
-                    "delivery_step_not_found", "Delivery step was not found", 404
-                )
-            row.status = step.status
-            row.attempts = step.attempts
-            row.error_code = step.error_code
-            row.updated_at = step.updated_at
 
     async def create_application(
         self,
@@ -611,23 +561,28 @@ class SQLAlchemyApplicationDeliveryRepository(ApplicationRepository):
         return False
 
     async def find_registered_repository(self, repository: str) -> RegisteredRepository | None:
-        row = await self.session.scalar(
-            select(ProjectRegistrationRow).where(
-                ProjectRegistrationRow.repository.ilike(repository),
-                ProjectRegistrationRow.configured.is_(True),
+        registrations = (
+            await self.session.scalars(
+                select(ProjectRegistrationRow)
+                .where(
+                    func.lower(ProjectRegistrationRow.repository) == repository.casefold(),
+                    ProjectRegistrationRow.configured.is_(True),
+                )
+                .limit(2)
             )
-        )
-        if row is None:
+        ).all()
+        if len(registrations) != 1:
             return None
+        registration = registrations[0]
         environment_id = await self.session.scalar(
-            select(ProjectEnvironmentRow.id)
-            .where(ProjectEnvironmentRow.project_id == row.project_id)
-            .order_by(ProjectEnvironmentRow.name)
-            .limit(1)
+            select(ProjectEnvironmentRow.id).where(
+                ProjectEnvironmentRow.project_id == registration.project_id,
+                ProjectEnvironmentRow.name == "preview",
+            )
         )
         if environment_id is None:
             return None
-        return RegisteredRepository(row.project_id, environment_id, repository)
+        return RegisteredRepository(registration.project_id, environment_id, repository.casefold())
 
     async def request_preview(
         self,
@@ -644,23 +599,11 @@ class SQLAlchemyApplicationDeliveryRepository(ApplicationRepository):
         ttl_seconds: int,
         now: datetime,
     ) -> UUID | None:
-        registration = await self.session.scalar(
-            select(ProjectRegistrationRow).where(
-                ProjectRegistrationRow.project_id == project_id,
-                ProjectRegistrationRow.repository.ilike(repository),
-                ProjectRegistrationRow.configured.is_(True),
-            )
-        )
-        if registration is None:
+        registration = await self.find_registered_repository(repository)
+        if registration is None or registration.project_id != project_id:
             return None
-        environment_id = await self.session.scalar(
-            select(ProjectEnvironmentRow.id)
-            .where(ProjectEnvironmentRow.project_id == project_id)
-            .order_by(ProjectEnvironmentRow.name)
-            .limit(1)
-        )
-        if environment_id is None:
-            return None
+        repository = registration.canonical_repository
+        environment_id = registration.environment_id
         repository_key = hashlib.sha256(repository.encode()).hexdigest()[:12]
         name = f"preview-{repository_key}-{pull_request}"
         app = await self.session.scalar(
@@ -857,6 +800,32 @@ class SQLAlchemyApplicationDeliveryRepository(ApplicationRepository):
         return count
 
     async def claim_step(self, now: datetime, lease_seconds: int) -> DeliveryClaim | None:
+        step_row = ApplicationDeliveryStepRow
+        prerequisite = aliased(ApplicationDeliveryStepRow)
+        blocked = (
+            select(prerequisite.id)
+            .where(
+                prerequisite.application_id == step_row.application_id,
+                or_(
+                    and_(
+                        step_row.kind.in_(("deployment", "resource", "template_update")),
+                        prerequisite.kind == "repository",
+                        prerequisite.status != "succeeded",
+                    ),
+                    and_(
+                        step_row.kind == "deployment",
+                        prerequisite.kind == "resource",
+                        prerequisite.status != "succeeded",
+                    ),
+                    and_(
+                        step_row.kind == "preview_cleanup",
+                        prerequisite.kind != "preview_cleanup",
+                        prerequisite.status.in_(("pending", "running")),
+                    ),
+                ),
+            )
+            .exists()
+        )
         due = and_(
             ApplicationDeliveryStepRow.next_attempt_at <= now,
             or_(
@@ -869,7 +838,7 @@ class SQLAlchemyApplicationDeliveryRepository(ApplicationRepository):
         )
         candidates = await self.session.scalars(
             select(ApplicationDeliveryStepRow.id)
-            .where(due)
+            .where(due, ~blocked)
             .order_by(
                 ApplicationDeliveryStepRow.next_attempt_at, ApplicationDeliveryStepRow.created_at
             )
@@ -913,21 +882,11 @@ class SQLAlchemyApplicationDeliveryRepository(ApplicationRepository):
                 )
             ):
                 continue
-            if not await self._dependencies_succeeded(step):
+            if await self.session.scalar(
+                select(blocked).select_from(step_row).where(step_row.id == step.id)
+            ):
                 continue
-            if step.kind == "preview_cleanup":
-                unresolved = await self.session.scalar(
-                    select(ApplicationDeliveryStepRow.id)
-                    .where(
-                        ApplicationDeliveryStepRow.application_id == app.id,
-                        ApplicationDeliveryStepRow.kind != "preview_cleanup",
-                        ApplicationDeliveryStepRow.status.in_(("pending", "running")),
-                    )
-                    .limit(1)
-                )
-                if unresolved is not None:
-                    continue
-            elif app.status in {"deleting", "deleted"}:
+            if step.kind != "preview_cleanup" and app.status in {"deleting", "deleted"}:
                 # Pending attempts>0 are retries of effects already started; replay
                 # with the same key to recover their stable result. Never start a new
                 # step after closure.
@@ -938,7 +897,11 @@ class SQLAlchemyApplicationDeliveryRepository(ApplicationRepository):
                     step.error_code = "preview_closed"
                     step.updated_at = now
                     continue
-            elif app.expires_at is not None and app.expires_at <= now:
+            elif (
+                step.kind != "preview_cleanup"
+                and app.expires_at is not None
+                and app.expires_at <= now
+            ):
                 app.status = "deleting"
                 app.updated_at = now
                 if step.status == "pending" and step.attempts == 0:
@@ -1166,29 +1129,6 @@ class SQLAlchemyApplicationDeliveryRepository(ApplicationRepository):
             raise PlatformRequestError(
                 "application_closed", "Application cleanup is in progress or complete", 409
             )
-
-    async def _dependencies_succeeded(self, step: ApplicationDeliveryStepRow) -> bool:
-        if step.kind in {"deployment", "resource", "template_update"}:
-            repository_step = await self.session.scalar(
-                select(ApplicationDeliveryStepRow.id).where(
-                    ApplicationDeliveryStepRow.application_id == step.application_id,
-                    ApplicationDeliveryStepRow.kind == "repository",
-                    ApplicationDeliveryStepRow.status != "succeeded",
-                )
-            )
-            if repository_step is not None:
-                return False
-        if step.kind == "deployment":
-            resource_step = await self.session.scalar(
-                select(ApplicationDeliveryStepRow.id).where(
-                    ApplicationDeliveryStepRow.application_id == step.application_id,
-                    ApplicationDeliveryStepRow.kind == "resource",
-                    ApplicationDeliveryStepRow.status != "succeeded",
-                )
-            )
-            if resource_step is not None:
-                return False
-        return True
 
     async def _claimed_rows(
         self, claim: DeliveryClaim, now: datetime

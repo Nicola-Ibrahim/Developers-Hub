@@ -27,10 +27,9 @@ class SqlAlchemyIdentityTransaction(BrowserTransaction):
 
     async def run(self, action: Callable[[BrowserRepository], Awaitable[T]]) -> T:
         try:
-            async with self.sessions() as session:
-                repository = self.repository_factory(session)
-                return await SqlAlchemyUnitOfWork(session).run(
-                    lambda: action(repository), lambda result: result
-                )
+            session = self.sessions()
+            return await SqlAlchemyUnitOfWork(session).run(
+                lambda: action(self.repository_factory(session)), lambda result: result
+            )
         except DatabaseUnavailable as error:
             raise IdentityUnavailable() from error

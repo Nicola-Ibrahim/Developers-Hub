@@ -123,8 +123,11 @@ class SQLAlchemyApiTokenRepository:
             raise IdentityUnavailable() from exc
 
     async def find_api_token(self, token_id: UUID) -> ApiTokenStatus | None:
+        """Lock the token through the revocation decision and its audit write."""
         try:
-            token = await self._session.get(ApiAccessTokenRow, token_id)
+            token = await self._session.get(
+                ApiAccessTokenRow, token_id, with_for_update=True, populate_existing=True
+            )
             if token is None:
                 return None
             return ApiTokenStatus(token.id, token.user_id, token.project_id, token.revoked_at)

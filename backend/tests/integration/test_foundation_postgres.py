@@ -12,7 +12,7 @@ from conftest import migration_config
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, inspect, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
@@ -29,9 +29,11 @@ from identity.application.shared.errors import CredentialDeliveryError
 from identity.infra.composition.api_token_transactions import IssueApiTokenToFile
 from identity.infra.persistence.models.api_token import ApiAccessTokenRow
 from identity.infra.persistence.models.user import InternalUserRow
+from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
 from identity.infra.security.credential_file import PrivateCredentialFile
 from migrations.metadata import registered_metadata
 from shared.infra.persistence.audit import AuditEvent
+from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import SCHEMA_REVISION, Settings
 
 pytestmark = pytest.mark.postgres
@@ -316,3 +318,118 @@ def test_revoke_is_idempotent_and_does_not_duplicate_audit(postgres_engine, tmp_
     assert not revoke(postgres_engine, uuid4())
     with Session(postgres_engine) as session:
         assert session.scalar(select(func.count()).select_from(AuditEvent)) == 2
+
+
+def test_concurrent_token_revocation_preserves_first_timestamp_and_single_audit(
+    postgres_engine, tmp_path
+):
+    token_id, _ = issue(postgres_engine, tmp_path / "credential")
+    database = async_engine_for(postgres_engine)
+    sessions = async_sessionmaker(database, expire_on_commit=False)
+    first_revoked_at = datetime(2026, 11, 19, 12, 0, tzinfo=UTC)
+    second_revoked_at = datetime(2026, 11, 19, 12, 1, tzinfo=UTC)
+    first_token_locked = asyncio.Event()
+    second_query_started = asyncio.Event()
+    release_first = asyncio.Event()
+    backend_pids = {}
+
+    class PausingTransaction:
+        async def run(self, action):
+            async with sessions() as session:
+                unit = SqlAlchemyUnitOfWork(session)
+                repository = SQLAlchemyApiTokenRepository(session)
+
+                class PausingRepository:
+                    async def find_api_token(self, token_id):
+                        status = await repository.find_api_token(token_id)
+                        backend_pids["first"] = await session.scalar(
+                            text("SELECT pg_backend_pid()")
+                        )
+                        first_token_locked.set()
+                        await release_first.wait()
+                        return status
+
+                    async def revoke_api_token(self, token_id, revoked_at):
+                        await repository.revoke_api_token(token_id, revoked_at)
+
+                    async def record_token_audit(self, event):
+                        await repository.record_token_audit(event)
+
+                return await unit.run(lambda: action(PausingRepository()), lambda result: result)
+
+    class ObservedTransaction:
+        async def run(self, action):
+            async with sessions() as session:
+                unit = SqlAlchemyUnitOfWork(session)
+                repository = SQLAlchemyApiTokenRepository(session)
+
+                async def run_action():
+                    backend_pids["second"] = await session.scalar(text("SELECT pg_backend_pid()"))
+                    second_query_started.set()
+                    return await action(repository)
+
+                return await unit.run(run_action, lambda result: result)
+
+    async def wait_until_second_is_blocked():
+        await asyncio.wait_for(second_query_started.wait(), timeout=10)
+        for _ in range(500):
+            async with sessions() as observer:
+                result = await observer.execute(
+                    text("SELECT pg_blocking_pids(:backend_pid)"),
+                    {"backend_pid": backend_pids["second"]},
+                )
+                blockers = result.scalar_one()
+            if backend_pids["first"] in blockers:
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("second revocation did not block on the first token lock")
+
+    async def exercise():
+        tasks = []
+        try:
+            first_handler = RevokeApiTokenHandler(PausingTransaction(), lambda: first_revoked_at)
+            first_task = asyncio.create_task(first_handler.execute(RevokeApiTokenCommand(token_id)))
+            tasks.append(first_task)
+            await asyncio.wait_for(first_token_locked.wait(), timeout=10)
+            second_handler = RevokeApiTokenHandler(ObservedTransaction(), lambda: second_revoked_at)
+            second_task = asyncio.create_task(
+                second_handler.execute(RevokeApiTokenCommand(token_id))
+            )
+            tasks.append(second_task)
+            await wait_until_second_is_blocked()
+            release_first.set()
+            return await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=10)
+        finally:
+            release_first.set()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            await database.dispose()
+
+    assert asyncio.run(exercise()) == [True, True]
+    with Session(postgres_engine) as session:
+        token = session.get(ApiAccessTokenRow, token_id)
+        assert token.revoked_at == first_revoked_at
+        persisted_revocation = token.revoked_at
+        revocation_audits = session.scalars(
+            select(AuditEvent).where(
+                AuditEvent.action == "token_revoked",
+                AuditEvent.request_id == token_id,
+            )
+        ).all()
+        assert len(revocation_audits) == 1
+        assert session.scalar(select(func.count()).select_from(AuditEvent)) == 2
+
+    assert revoke(postgres_engine, token_id)
+    with Session(postgres_engine) as session:
+        assert session.get(ApiAccessTokenRow, token_id).revoked_at == persisted_revocation
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(AuditEvent)
+                .where(
+                    AuditEvent.action == "token_revoked",
+                    AuditEvent.request_id == token_id,
+                )
+            )
+            == 1
+        )

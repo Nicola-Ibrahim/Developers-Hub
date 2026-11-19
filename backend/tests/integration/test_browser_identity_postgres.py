@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for
@@ -48,7 +49,8 @@ from identity.infra.persistence.models.session import (
     BrowserLoginThrottleRow,
     BrowserSessionRow,
 )
-from identity.infra.persistence.models.user import InternalUserRow
+from identity.infra.persistence.models.user import InternalUserRow, PasswordSetupRow
+from identity.infra.persistence.repositories import accounts_sessions
 from identity.infra.persistence.repositories.accounts_sessions import SQLAlchemyIdentityRepository
 from identity.infra.security.browser_tokens import JwtBrowserSessionTokens
 from identity.infra.security.login_verifier import LoginCredentialVerifier
@@ -210,9 +212,7 @@ def test_browser_session_survives_service_restart_and_revokes_on_password_reset(
         assert login.principal.role == "admin"
         assert login.session_token not in repr(login)
         with pytest.raises(IdentityValidationError):
-            await first_service.execute(
-                first_service.set_membership(user_id, user_id, project_id, "developer")
-            )
+            await first_service.set_membership(user_id, user_id, project_id, "developer")
         await first_service.execute(AuthenticateSessionQuery(login.session_token, project_id))
         members = await first_service.list_project_members(user_id, project_id)
         assert len(members) == 1 and members[0][0] == user_id
@@ -266,6 +266,130 @@ def test_browser_session_survives_service_restart_and_revokes_on_password_reset(
         asyncio.run(exercise())
     finally:
         asyncio.run(database.dispose())
+
+
+def test_concurrent_password_setup_issuers_leave_one_setup_active(postgres_engine):
+    user_id, _project_id, _user_name = seed_user(postgres_engine)
+    database = async_engine_for(postgres_engine)
+    sessions = async_sessionmaker(database, expire_on_commit=False)
+    service = IdentityFixture(sessions, lambda: datetime.now(UTC))
+
+    async def exercise():
+        try:
+            secrets = await asyncio.wait_for(
+                asyncio.gather(
+                    service.execute(StartPasswordSetupCommand(user_id, user_id)),
+                    service.execute(StartPasswordSetupCommand(user_id, user_id)),
+                ),
+                timeout=10,
+            )
+            return secrets
+        finally:
+            await database.dispose()
+
+    issued_secrets = asyncio.run(exercise())
+    digests = {service.digest(secret) for secret in issued_secrets}
+    with Session(postgres_engine) as session:
+        setups = session.scalars(
+            select(PasswordSetupRow).where(PasswordSetupRow.user_id == user_id)
+        ).all()
+        active = [setup for setup in setups if setup.consumed_at is None]
+        assert len(setups) == 2
+        assert len(active) == 1
+        assert active[0].digest in digests
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(IdentityActivityRow)
+                .where(
+                    IdentityActivityRow.subject_id == user_id,
+                    IdentityActivityRow.action == "password_setup_issued",
+                )
+            )
+            == 2
+        )
+
+
+def test_password_setup_consume_racing_new_setup_invalidation_is_serialized(postgres_engine):
+    user_id, _project_id, _user_name = seed_user(postgres_engine)
+    database = async_engine_for(postgres_engine)
+    sessions = async_sessionmaker(database, expire_on_commit=False)
+    service = IdentityFixture(sessions, lambda: datetime.now(UTC))
+    old_secret = asyncio.run(service.execute(StartPasswordSetupCommand(user_id, user_id)))
+    with Session(postgres_engine) as session:
+        original_hash = session.get(InternalUserRow, user_id).password_hash
+    replacement_password = "concurrent-setup-replacement-password"
+
+    async def exercise():
+        try:
+            return await asyncio.wait_for(
+                asyncio.gather(
+                    service.execute(CompletePasswordSetupCommand(old_secret, replacement_password)),
+                    service.execute(StartPasswordSetupCommand(user_id, user_id)),
+                ),
+                timeout=10,
+            )
+        finally:
+            await database.dispose()
+
+    consumed, new_secret = asyncio.run(exercise())
+    with Session(postgres_engine) as session:
+        setups = session.scalars(
+            select(PasswordSetupRow).where(PasswordSetupRow.user_id == user_id)
+        ).all()
+        old_setup = next(setup for setup in setups if setup.digest == service.digest(old_secret))
+        active = [setup for setup in setups if setup.consumed_at is None]
+        user = session.get(InternalUserRow, user_id)
+        consume_audits = session.scalar(
+            select(func.count())
+            .select_from(IdentityActivityRow)
+            .where(
+                IdentityActivityRow.subject_id == user_id,
+                IdentityActivityRow.action == "password_setup_consumed",
+            )
+        )
+        assert old_setup.consumed_at is not None
+        assert len(active) == 1
+        assert active[0].digest == service.digest(new_secret)
+        if consumed:
+            assert user.password_hash != original_hash
+        else:
+            assert user.password_hash == original_hash
+        assert consume_audits == int(consumed)
+
+
+def test_password_setup_credential_stays_invalid_after_user_disable_and_reenable(postgres_engine):
+    user_id, _project_id, _user_name = seed_user(postgres_engine, role="developer")
+    database = async_engine_for(postgres_engine)
+    sessions = async_sessionmaker(database, expire_on_commit=False)
+    service = IdentityFixture(sessions, lambda: datetime.now(UTC))
+    with Session(postgres_engine) as session:
+        original_hash = session.get(InternalUserRow, user_id).password_hash
+
+    async def exercise():
+        try:
+            secret = await service.execute(StartPasswordSetupCommand(user_id, user_id))
+            await service.execute(SetUserStatusCommand(user_id, user_id, False))
+            await service.execute(SetUserStatusCommand(user_id, user_id, True))
+            assert not await service.execute(
+                CompletePasswordSetupCommand(secret, "stale-setup-credential-password")
+            )
+            return secret
+        finally:
+            await database.dispose()
+
+    secret = asyncio.run(exercise())
+    with Session(postgres_engine) as session:
+        setup = session.scalar(
+            select(PasswordSetupRow).where(
+                PasswordSetupRow.user_id == user_id,
+                PasswordSetupRow.digest == service.digest(secret),
+            )
+        )
+        user = session.get(InternalUserRow, user_id)
+        assert user.active
+        assert user.password_hash == original_hash
+        assert setup is not None and setup.consumed_at is not None
 
 
 def test_persistent_username_throttle_blocks_retries_without_revealing_account(postgres_engine):
@@ -411,7 +535,9 @@ def test_membership_update_and_session_authorization_share_lock_order(postgres_e
 
 
 @pytest.mark.parametrize("operation", ["authorize", "select_project"])
-def test_revocation_during_authority_lock_wait_is_revalidated(postgres_engine, operation):
+def test_revocation_during_authority_lock_wait_is_revalidated(
+    postgres_engine, operation, monkeypatch
+):
     _user_id, project_id, user_name = seed_user(postgres_engine)
     database = async_engine_for(postgres_engine)
     sessions = async_sessionmaker(database, expire_on_commit=False)
@@ -425,14 +551,15 @@ def test_revocation_during_authority_lock_wait_is_revalidated(postgres_engine, o
         async def authorize():
             async with sessions() as session, session.begin():
                 repository = SQLAlchemyIdentityRepository(session)
-                original = repository._lock_user_projects
+                original = accounts_sessions.lock_user_project_access
 
-                async def paused_lookup(user_id, extra=()):
-                    discovered.set()
-                    await resume.wait()
-                    return await original(user_id, extra)
+                async def paused_lookup(caller_session, user_id, additional_project_ids=()):
+                    if caller_session is session:
+                        discovered.set()
+                        await resume.wait()
+                    return await original(caller_session, user_id, additional_project_ids)
 
-                repository._lock_user_projects = paused_lookup
+                monkeypatch.setattr(accounts_sessions, "lock_user_project_access", paused_lookup)
                 if operation == "authorize":
                     return await repository.authorize_browser_operation(
                         digest, project_id, datetime.now(UTC)
@@ -443,8 +570,13 @@ def test_revocation_during_authority_lock_wait_is_revalidated(postgres_engine, o
 
         pending = asyncio.create_task(authorize())
         await asyncio.wait_for(discovered.wait(), timeout=5)
-        await service.execute(LogoutCommand(login.session_token, login.csrf_token, ORIGIN))
-        resume.set()
+        try:
+            await asyncio.wait_for(
+                service.execute(LogoutCommand(login.session_token, login.csrf_token, ORIGIN)),
+                timeout=5,
+            )
+        finally:
+            resume.set()
         assert await asyncio.wait_for(pending, timeout=5) is None
 
     try:

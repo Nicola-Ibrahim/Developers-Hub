@@ -39,9 +39,6 @@ class SQLAlchemyApplicationDatabaseBindings(ApplicationDatabaseBindingResolver):
         self, project_id: UUID, application_id: UUID, resource_id: UUID
     ) -> ApplicationDatabaseBinding:
         async with self.sessions() as session, session.begin():
-            now = await session.scalar(select(func.clock_timestamp()))
-            if not isinstance(now, datetime):
-                now = datetime.now(UTC)
             app = await session.scalar(
                 select(ApplicationRow)
                 .where(ApplicationRow.id == application_id)
@@ -57,6 +54,9 @@ class SQLAlchemyApplicationDatabaseBindings(ApplicationDatabaseBindingResolver):
                 )
                 .with_for_update(read=True)
             )
+            now = await session.scalar(select(func.clock_timestamp()))
+            if not isinstance(now, datetime):
+                now = datetime.now(UTC)
             if (
                 app is None
                 or app.project_id != project_id

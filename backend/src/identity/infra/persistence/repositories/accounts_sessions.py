@@ -431,6 +431,7 @@ class SQLAlchemyIdentityRepository(
             return False
         user.password_hash = password_hash
         user.credential_version += 1
+        await self._invalidate_password_setups(user_id, now)
         await self._session.execute(
             update(BrowserSessionRow)
             .where(BrowserSessionRow.user_id == user_id, BrowserSessionRow.revoked_at.is_(None))
@@ -476,6 +477,7 @@ class SQLAlchemyIdentityRepository(
                 raise IdentityValidationError(conflict)
         user.active = active
         user.credential_version += 1
+        await self._invalidate_password_setups(user_id, now)
         if not active:
             await self._session.execute(
                 update(BrowserSessionRow)
@@ -497,14 +499,10 @@ class SQLAlchemyIdentityRepository(
         actor_id: UUID,
         now: datetime,
     ) -> None:
-        user = await self._session.get(InternalUserRow, user_id)
+        user = await self._session.get(InternalUserRow, user_id, with_for_update=True)
         if user is None or not user.active:
             raise IdentityValidationError("User does not exist or is disabled")
-        await self._session.execute(
-            update(PasswordSetupRow)
-            .where(PasswordSetupRow.user_id == user_id, PasswordSetupRow.consumed_at.is_(None))
-            .values(consumed_at=now)
-        )
+        await self._invalidate_password_setups(user_id, now)
         self._session.add(
             PasswordSetupRow(user_id=user_id, digest=digest, expires_at=expires_at, created_at=now)
         )
@@ -515,17 +513,24 @@ class SQLAlchemyIdentityRepository(
     async def consume_password_setup(
         self, *, digest: str, password_hash: str, now: datetime
     ) -> bool:
+        # Discover the account without locking the setup row. All writers lock the
+        # account first, then re-read setup state after acquiring that lock.
+        user_id = await self._session.scalar(
+            select(PasswordSetupRow.user_id).where(PasswordSetupRow.digest == digest)
+        )
+        if user_id is None:
+            return False
+        user = await self._session.get(InternalUserRow, user_id, with_for_update=True)
+        if user is None or not user.active:
+            return False
         setup = await self._session.scalar(
-            select(PasswordSetupRow).where(PasswordSetupRow.digest == digest).with_for_update()
+            select(PasswordSetupRow).where(
+                PasswordSetupRow.digest == digest, PasswordSetupRow.user_id == user_id
+            )
         )
         if setup is None or setup.consumed_at is not None or setup.expires_at <= now:
             return False
-        user = await self._session.scalar(
-            select(InternalUserRow).where(InternalUserRow.id == setup.user_id).with_for_update()
-        )
-        if user is None or not user.active:
-            return False
-        setup.consumed_at = now
+        await self._invalidate_password_setups(user_id, now)
         user.password_hash = password_hash
         user.credential_version += 1
         await self._session.execute(
@@ -537,6 +542,13 @@ class SQLAlchemyIdentityRepository(
             user.id, user.id, None, "password_setup_consumed", "succeeded", now
         )
         return True
+
+    async def _invalidate_password_setups(self, user_id: UUID, now: datetime) -> None:
+        await self._session.execute(
+            update(PasswordSetupRow)
+            .where(PasswordSetupRow.user_id == user_id, PasswordSetupRow.consumed_at.is_(None))
+            .values(consumed_at=now)
+        )
 
     async def _record_activity(
         self,

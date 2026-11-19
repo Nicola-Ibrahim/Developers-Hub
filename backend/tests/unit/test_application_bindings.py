@@ -41,9 +41,9 @@ class FakeSession:
 
     async def scalar(self, statement):
         self.statements.append(statement)
-        if len(self.statements) == 1:
-            return datetime.now(UTC)
         entity = statement.column_descriptions[0].get("entity")
+        if entity is None:
+            return datetime.now(UTC)
         if entity is ApplicationRow:
             return self.app
         if entity is Resource:
@@ -123,8 +123,8 @@ def test_database_binding_decrypts_inside_short_app_then_resource_read_transacti
     assert binding.application_id == app_id
     assert cipher.was_inside_transaction
     assert session.exited
-    app_select = session.statements[1]
-    resource_select = session.statements[2]
+    app_select, resource_select, clock_select = session.statements
+    assert "clock_timestamp" in str(clock_select)
     assert app_select._for_update_arg is not None and app_select._for_update_arg.read
     assert resource_select._for_update_arg is not None and resource_select._for_update_arg.read
 

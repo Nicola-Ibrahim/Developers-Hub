@@ -125,9 +125,10 @@ class ApplicationDeliveryHost:
         present: Callable[[T], R],
     ) -> R:
         try:
-            async with self.sessions() as session:
-                repository = SQLAlchemyApplicationDeliveryRepository(session)
-                return await SqlAlchemyUnitOfWork(session).run(lambda: action(repository), present)
+            session = self.sessions()
+            return await SqlAlchemyUnitOfWork(session).run(
+                lambda: action(SQLAlchemyApplicationDeliveryRepository(session)), present
+            )
         except DatabaseUnavailable as error:
             raise PlatformRequestError(
                 "delivery_unavailable", "Application delivery database is unavailable", 503

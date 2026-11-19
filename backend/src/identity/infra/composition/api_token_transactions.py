@@ -33,10 +33,10 @@ class SqlAlchemyApiTokenTransaction(ApiTokenTransaction):
 
     async def run(self, action: Callable[[ApiTokenRepository], Awaitable[T]]) -> T:
         try:
-            async with self.sessions() as session:
-                unit = SqlAlchemyUnitOfWork(session)
-                repository = SQLAlchemyApiTokenRepository(session)
-                return await unit.run(lambda: action(repository), lambda value: value)
+            session = self.sessions()
+            return await SqlAlchemyUnitOfWork(session).run(
+                lambda: action(SQLAlchemyApiTokenRepository(session)), lambda value: value
+            )
         except DatabaseUnavailable as error:
             raise IdentityUnavailable() from error
 

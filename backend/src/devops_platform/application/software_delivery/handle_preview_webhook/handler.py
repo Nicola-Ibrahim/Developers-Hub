@@ -84,14 +84,14 @@ class ProcessGithubPreviewWebhookHandler:
         )
         if not recorded:
             return WebhookResult(True, True, None, reason="duplicate_delivery")
-        registered = await self.repository.find_registered_repository(repository.casefold())
-        if registered is None:
-            return WebhookResult(False, False, None, reason="repository_not_registered")
         if action == "closed":
             count = await self.repository.close_preview(
                 repository=repository.casefold(), pull_request=number, now=command.now
             )
             return WebhookResult(True, False, None, cleanup_count=count)
+        registered = await self.repository.find_registered_repository(repository.casefold())
+        if registered is None:
+            return WebhookResult(False, False, None, reason="repository_not_registered")
         head = pull_request.get("head")
         base = pull_request.get("base")
         if not isinstance(head, dict) or not isinstance(base, dict):
