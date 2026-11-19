@@ -10,8 +10,10 @@ from identity.application.shared.session_security import (
 from identity.application.shared.session_security import (
     require_browser_origin,
 )
+from identity.domain.interfaces.project_access import IdentityProjectAccess
 from identity.domain.records import SessionPrincipal
-from identity.infra.persistence.repositories.accounts_sessions import SQLAlchemyIdentityRepository
+from identity.infra.persistence.repositories.sessions import SQLAlchemySessionRepository
+from identity.infra.persistence.repositories.users import SQLAlchemyUserRepository
 from identity.infra.security.tokens import PepperedTokenHasher
 from shared.infra.clock import Clock
 
@@ -26,12 +28,16 @@ async def authenticate_browser_operation(
     allowed_origins: tuple[str, ...] = (),
     mutate: bool = False,
     token_pepper: str = "",
+    *,
+    project_access: IdentityProjectAccess,
 ) -> SessionPrincipal:
     if mutate:
         require_browser_origin(origin, allowed_origins)
     digest = PepperedTokenHasher(token_pepper).digest
+    users = SQLAlchemyUserRepository(session, project_access)
+    sessions = SQLAlchemySessionRepository(session, users, project_access)
     return await apply_browser_policy(
-        SQLAlchemyIdentityRepository(session),
+        sessions,
         token_digest=digest(token),
         project_id=project_id,
         now=clock(),

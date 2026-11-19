@@ -5,18 +5,24 @@ from uuid import uuid4
 from dishka import Provider, Scope, make_async_container, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from composition.integrations.providers import IdentityActionIntegrationProvider
+from identity.application.authentication.authenticate_session.handler import (
+    AuthenticateSessionHandler,
+)
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
-from identity.application.interfaces.security import TokenHasher
+from identity.application.interfaces.security import TokenGenerator, TokenHasher
+from identity.application.sessions.list_sessions.handler import ListSessionsHandler
 from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand
 from identity.application.sessions.revoke_all_sessions.handler import RevokeAllSessionsHandler
 from identity.application.sessions.revoke_session.command import RevokeSessionCommand
 from identity.application.sessions.revoke_session.handler import RevokeSessionHandler
+from identity.application.sessions.rotate_csrf.handler import RotateCsrfHandler
+from identity.application.sessions.select_active_project.handler import SelectActiveProjectHandler
 from identity.domain.aggregates.session import Session
 from identity.domain.records import SessionPrincipal
 from identity.domain.value_objects.session_expiry import SessionExpiry
 from identity.infra.composition.action_provider import IdentityActionProvider
-from identity.infra.composition.providers import IdentityProvider
 from shared.infra.clock import Clock
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
@@ -41,7 +47,7 @@ def test_session_revocation_is_idempotent_and_keeps_first_timestamp() -> None:
     assert revoked.revoke(revoked_at + timedelta(minutes=1)) is revoked
 
 
-def test_revoke_handler_authorizes_and_persists_in_one_unit_of_work() -> None:
+def test_revoke_handler_authorizes_and_persists_for_dispatch_transaction() -> None:
     now = datetime(2026, 1, 1, tzinfo=UTC)
     user_id, session_id = uuid4(), uuid4()
     session = Session(
@@ -61,7 +67,6 @@ def test_revoke_handler_authorizes_and_persists_in_one_unit_of_work() -> None:
         async def validate_csrf(self, token_digest, csrf_digest):
             return token_digest == "session-digest" and csrf_digest == "csrf-digest"
 
-    class Revocations:
         async def load_for_revocation(self, owner_id, target_id):
             assert (owner_id, target_id) == (user_id, session_id)
             return session
@@ -69,16 +74,9 @@ def test_revoke_handler_authorizes_and_persists_in_one_unit_of_work() -> None:
         async def save_revocation(self, revoked):
             self.saved = revoked
 
-    class UnitOfWork:
-        async def run(self, action, materialize):
-            self.calls = getattr(self, "calls", 0) + 1
-            return materialize(await action())
-
-    authorization, revocations, unit = Authorization(), Revocations(), UnitOfWork()
+    repository = Authorization()
     handler = RevokeSessionHandler(
-        authorization,
-        revocations,
-        unit,
+        repository,
         lambda: now,
         lambda value: f"{value}-digest",
         ("https://portal.example",),
@@ -89,37 +87,7 @@ def test_revoke_handler_authorizes_and_persists_in_one_unit_of_work() -> None:
             RevokeSessionCommand("session", session_id, "csrf", "https://portal.example")
         )
     )
-    assert unit.calls == 1
-    assert revocations.saved.revoked_at == now
-
-
-def test_revoke_handler_repositories_and_uow_share_request_session() -> None:
-    config = Settings(
-        database_url="postgresql+psycopg://localhost:1/devops_hub_test", token_pepper="t" * 40
-    )
-    provider = IdentityProvider()
-    session = object()
-    unit = SqlAlchemyUnitOfWork(session)
-
-    def clock():
-        return datetime(2026, 1, 1, tzinfo=UTC)
-
-    class Hasher:
-        @staticmethod
-        def digest(value: str) -> str:
-            return value
-
-    logout = provider.logout_browser_session(session, unit, clock, Hasher(), config)
-    revoke_all = provider.logout_all_browser_sessions(session, unit, clock, Hasher(), config)
-    revoke = provider.revoke_browser_session(session, unit, clock, Hasher(), config)
-
-    assert revoke.authorization._session is session
-    assert revoke.revocations._session is session
-    assert revoke.unit._unit.session is session
-    for operation in (logout, revoke_all):
-        assert operation.authorization._session is session
-        assert operation.sessions._session is session
-        assert operation.unit._unit.session is session
+    assert repository.saved.revoked_at == now
 
 
 def test_logout_and_revoke_all_authorize_before_writing_in_unit_of_work() -> None:
@@ -136,7 +104,6 @@ def test_logout_and_revoke_all_authorize_before_writing_in_unit_of_work() -> Non
             calls.append(("csrf", (token_digest, csrf_digest)))
             return token_digest == "session-digest" and csrf_digest == "csrf-digest"
 
-    class Sessions:
         async def logout(self, token_digest, time):
             calls.append(("logout", (token_digest, time)))
 
@@ -144,21 +111,14 @@ def test_logout_and_revoke_all_authorize_before_writing_in_unit_of_work() -> Non
             calls.append(("logout_all", (owner_id, time)))
             return 3
 
-    class Unit:
-        async def run(self, action, materialize):
-            calls.append(("begin", None))
-            return materialize(await action())
-
-    authorization, sessions, unit = Authorization(), Sessions(), Unit()
+    repository = Authorization()
 
     def digest(value):
         return f"{value}-digest"
 
-    logout = LogoutHandler(
-        authorization, sessions, unit, lambda: now, digest, ("https://portal.example",)
-    )
+    logout = LogoutHandler(repository, lambda: now, digest, ("https://portal.example",))
     revoke_all = RevokeAllSessionsHandler(
-        authorization, sessions, unit, lambda: now, digest, ("https://portal.example",)
+        repository, lambda: now, digest, ("https://portal.example",)
     )
 
     async def verify() -> None:
@@ -174,11 +134,9 @@ def test_logout_and_revoke_all_authorize_before_writing_in_unit_of_work() -> Non
 
     asyncio.run(verify())
     assert calls == [
-        ("begin", None),
         ("authorize", True),
         ("csrf", ("session-digest", "csrf-digest")),
         ("logout", ("session-digest", now)),
-        ("begin", None),
         ("authorize", True),
         ("csrf", ("session-digest", "csrf-digest")),
         ("logout_all", (user_id, now)),
@@ -222,27 +180,48 @@ def test_identity_action_handlers_get_fresh_sessions_and_share_each_uow_session(
             return Hasher()
 
         @provide(scope=Scope.APP)
+        def generator(self) -> TokenGenerator:
+            class Generator:
+                def generate(self) -> str:
+                    return "generated"
+
+            return Generator()
+
+        @provide(scope=Scope.APP)
         def settings(self) -> Settings:
             return config
 
     async def verify() -> None:
         container = make_async_container(
-            RootProvider(), IdentityActionProvider(component="identity_action")
+            RootProvider(),
+            IdentityActionIntegrationProvider(component="identity_action"),
+            IdentityActionProvider(component="identity_action"),
         )
         try:
-            for handler_type in (LogoutHandler, RevokeAllSessionsHandler, RevokeSessionHandler):
+            for handler_type in (
+                LogoutHandler,
+                RevokeAllSessionsHandler,
+                RevokeSessionHandler,
+                AuthenticateSessionHandler,
+                ListSessionsHandler,
+                RotateCsrfHandler,
+                SelectActiveProjectHandler,
+            ):
                 async with container(scope=Scope.ACTION) as action:
                     handler = await action.get(handler_type, component="identity_action")
                     session = created_sessions[-1]
-                    if handler_type is RevokeSessionHandler:
-                        assert handler.authorization._session is session
-                        assert handler.revocations._session is session
-                    else:
-                        assert handler.authorization._session is session
+                    unit = await action.get(SqlAlchemyUnitOfWork, component="identity_action")
+                    if handler_type in (
+                        LogoutHandler,
+                        RevokeAllSessionsHandler,
+                        RevokeSessionHandler,
+                    ):
                         assert handler.sessions._session is session
-                    assert handler.unit._unit.session is session
-            assert len(created_sessions) == 3
-            assert len({id(session) for session in created_sessions}) == 3
+                    else:
+                        assert handler.repository._session is session
+                    assert unit.session is session
+            assert len(created_sessions) == 7
+            assert len({id(session) for session in created_sessions}) == 7
         finally:
             await container.close()
 

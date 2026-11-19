@@ -7,10 +7,11 @@ from datetime import UTC, datetime
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from shared.application.interfaces.readiness import ReadinessProbe
 from shared.infra.clock import Clock
 from shared.infra.persistence.database import create_async_database_engine
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
-from shared.infra.readiness import ReadinessProbe, SqlAlchemyReadinessProbe
+from shared.infra.readiness import SqlAlchemyReadinessProbe
 from shared.infra.settings import SCHEMA_REVISION, Settings
 
 

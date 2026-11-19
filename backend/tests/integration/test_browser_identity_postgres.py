@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for
 
 from composition.integrations.project_access_persistence import (
-    identity_repository_for_session,
+    SqlAlchemyIdentityProjectAccess,
+    identity_repositories_for_session,
     project_access_repository_for_session,
 )
 from devops_platform.domain.value_objects.project_role import ProjectRole
@@ -41,17 +42,12 @@ from identity.application.sessions.rotate_csrf.handler import RotateCsrfHandler
 from identity.domain.browser_errors import BrowserAuthenticationRejected
 from identity.domain.errors import IdentityValidationError
 from identity.infra.composition.browser_transactions import SqlAlchemyIdentityTransaction
-from identity.infra.composition.session_revocation_unit_of_work import (
-    IdentitySessionRevocationUnitOfWork,
-)
 from identity.infra.persistence.models.activity import IdentityActivityRow
 from identity.infra.persistence.models.session import (
     BrowserLoginThrottleRow,
     BrowserSessionRow,
 )
 from identity.infra.persistence.models.user import InternalUserRow, PasswordSetupRow
-from identity.infra.persistence.repositories import accounts_sessions
-from identity.infra.persistence.repositories.accounts_sessions import SQLAlchemyIdentityRepository
 from identity.infra.security.browser_tokens import JwtBrowserSessionTokens
 from identity.infra.security.login_verifier import LoginCredentialVerifier
 from identity.infra.security.passwords import ScryptPasswordHasher
@@ -109,7 +105,7 @@ class IdentityFixture:
     def __init__(self, sessions, clock):
         self.sessions = sessions
         self.clock = clock
-        transaction = SqlAlchemyIdentityTransaction(sessions, identity_repository_for_session)
+        transaction = SqlAlchemyIdentityTransaction(sessions, identity_repositories_for_session)
         passwords = ScryptPasswordHasher()
         tokens = SecureTokenGenerator()
         digest = PepperedTokenHasher(PEPPER).digest
@@ -132,28 +128,32 @@ class IdentityFixture:
             CompletePasswordSetupCommand: CompletePasswordSetupHandler(
                 transaction, passwords, clock, digest
             ),
-            AuthenticateSessionQuery: AuthenticateSessionHandler(transaction, clock, digest),
-            RotateCsrfCommand: RotateCsrfHandler(transaction, clock, digest, tokens.generate),
-            LogoutCommand: self._logout_handler(clock, digest),
+            AuthenticateSessionQuery: self._action_handler(
+                lambda _users, repository: AuthenticateSessionHandler(repository, clock, digest)
+            ),
+            RotateCsrfCommand: self._action_handler(
+                lambda _users, repository: RotateCsrfHandler(
+                    repository, clock, digest, tokens.generate
+                )
+            ),
+            LogoutCommand: self._action_handler(
+                lambda _users, repository: LogoutHandler(repository, clock, digest, (ORIGIN,))
+            ),
         }
 
-    def _logout_handler(self, clock, digest):
+    def _action_handler(self, build_handler):
         fixture = self
 
-        class Logout:
+        class Action:
             async def execute(self, command):
-                async with fixture.sessions() as session:
-                    repository = SQLAlchemyIdentityRepository(session)
-                    return await LogoutHandler(
-                        repository,
-                        repository,
-                        IdentitySessionRevocationUnitOfWork(SqlAlchemyUnitOfWork(session)),
-                        clock,
-                        digest,
-                        (ORIGIN,),
-                    ).execute(command)
+                session = fixture.sessions()
+                users, repository = identity_repositories_for_session(session)
+                handler = build_handler(users, repository)
+                return await SqlAlchemyUnitOfWork(session).run(
+                    lambda: handler.execute(command), lambda result: result
+                )
 
-        return Logout()
+        return Action()
 
     async def execute(self, message):
         return await self.handlers[type(message)].execute(message)
@@ -510,7 +510,8 @@ def test_membership_update_and_session_authorization_share_lock_order(postgres_e
 
         async def authorize():
             async with sessions() as session, session.begin():
-                principal = await SQLAlchemyIdentityRepository(session).authorize_browser_operation(
+                _users, repository = identity_repositories_for_session(session)
+                principal = await repository.authorize_browser_operation(
                     digest, project_id, datetime.now(UTC)
                 )
                 assert principal is not None
@@ -550,16 +551,20 @@ def test_revocation_during_authority_lock_wait_is_revalidated(
 
         async def authorize():
             async with sessions() as session, session.begin():
-                repository = SQLAlchemyIdentityRepository(session)
-                original = accounts_sessions.lock_user_project_access
+                _users, repository = identity_repositories_for_session(session)
+                original = SqlAlchemyIdentityProjectAccess.lock_user_project_access
 
-                async def paused_lookup(caller_session, user_id, additional_project_ids=()):
-                    if caller_session is session:
+                async def paused_lookup(project_access, user_id, additional_project_ids=()):
+                    if project_access._session is session:
                         discovered.set()
                         await resume.wait()
-                    return await original(caller_session, user_id, additional_project_ids)
+                    return await original(project_access, user_id, additional_project_ids)
 
-                monkeypatch.setattr(accounts_sessions, "lock_user_project_access", paused_lookup)
+                monkeypatch.setattr(
+                    SqlAlchemyIdentityProjectAccess,
+                    "lock_user_project_access",
+                    paused_lookup,
+                )
                 if operation == "authorize":
                     return await repository.authorize_browser_operation(
                         digest, project_id, datetime.now(UTC)

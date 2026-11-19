@@ -4,23 +4,35 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from identity.domain.records import AccountCredentials, SessionPrincipal
+from identity.domain.records import AccountCredentials, AccountSessionDetails
 
 
 class UserRepository(Protocol):
+    async def issue_password_setup(
+        self,
+        *,
+        user_id: UUID,
+        digest: str,
+        expires_at: datetime,
+        actor_id: UUID,
+        now: datetime,
+    ) -> None: ...
+
     async def find_login_account(self, user_name: str) -> AccountCredentials | None: ...
 
-    async def complete_login(
+    async def record_login_attempt(
         self,
         *,
         user_name: str,
         username_digest: str,
         expected_version: int | None,
         accepted: bool,
-        token_digest: str,
-        csrf_digest: str,
         now: datetime,
-    ) -> tuple[SessionPrincipal, UUID, datetime] | None: ...
+    ) -> tuple[UUID, str, int] | None: ...
+
+    async def load_session_account(
+        self, user_id: UUID, *, lock_for_update: bool = False, shared_lock: bool = False
+    ) -> AccountSessionDetails | None: ...
 
     async def change_password(
         self, *, user_id: UUID, expected_version: int, password_hash: str, now: datetime
@@ -32,4 +44,8 @@ class UserRepository(Protocol):
 
     async def set_user_active(
         self, *, actor_id: UUID, user_id: UUID, active: bool, now: datetime
-    ) -> None: ...
+    ) -> bool: ...
+
+    async def consume_password_setup(
+        self, *, digest: str, password_hash: str, now: datetime
+    ) -> UUID | None: ...

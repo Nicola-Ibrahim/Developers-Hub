@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 import httpx
 from dishka import AsyncContainer, Provider, Scope, provide
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from identity.application.accounts.change_password.handler import ChangePasswordHandler
 from identity.application.accounts.complete_password_setup.handler import (
@@ -19,45 +18,24 @@ from identity.application.api_tokens.authenticate_api_token.handler import (
 )
 from identity.application.api_tokens.issue_api_token.handler import IssueApiTokenHandler
 from identity.application.api_tokens.revoke_api_token.handler import RevokeApiTokenHandler
-from identity.application.authentication.authenticate_session.handler import (
-    AuthenticateSessionHandler,
-)
 from identity.application.authentication.login.handler import LoginHandler
-from identity.application.authentication.logout.handler import LogoutHandler
 from identity.application.interfaces.authorization import AuthorizationDecisionPort
 from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
 from identity.application.interfaces.browser_transactions import BrowserTransaction
 from identity.application.interfaces.dispatch import IdentityModule
 from identity.application.interfaces.security import PasswordHasher, TokenGenerator, TokenHasher
-from identity.application.interfaces.token_operations import ApiTokenTransaction
-from identity.application.sessions.list_sessions.handler import ListSessionsHandler
-from identity.application.sessions.revoke_all_sessions.handler import RevokeAllSessionsHandler
-from identity.application.sessions.revoke_session.handler import RevokeSessionHandler
-from identity.application.sessions.rotate_csrf.handler import RotateCsrfHandler
-from identity.application.sessions.select_active_project.handler import (
-    SelectActiveProjectHandler,
-)
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.infra.authorization.opa import OpaAuthorizationClient
 from identity.infra.composition.api_token_transactions import (
     IssueApiTokenToFile,
-    SqlAlchemyApiTokenTransaction,
 )
 from identity.infra.composition.module import IdentityModuleDispatcher
-from identity.infra.composition.session_revocation_unit_of_work import (
-    IdentitySessionRevocationUnitOfWork,
-)
-from identity.infra.persistence.repositories.accounts_sessions import SQLAlchemyIdentityRepository
 from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
-from identity.infra.persistence.repositories.session_revocation import (
-    SQLAlchemySessionRevocationRepository,
-)
 from identity.infra.security.browser_tokens import JwtBrowserSessionTokens
 from identity.infra.security.login_verifier import LoginCredentialVerifier
 from identity.infra.security.passwords import ScryptPasswordHasher
 from identity.infra.security.tokens import PepperedTokenHasher, SecureTokenGenerator
 from shared.infra.clock import Clock
-from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
 
 
@@ -125,103 +103,6 @@ class IdentityProvider(Provider):
         self, client: httpx.AsyncClient, settings: Settings
     ) -> OpaAuthorizationClient:
         return OpaAuthorizationClient(settings.opa_url, client)
-
-    token_transaction = provide(
-        SqlAlchemyApiTokenTransaction,
-        provides=ApiTokenTransaction,
-        scope=Scope.REQUEST,
-    )
-
-    @provide(scope=Scope.REQUEST)
-    def authenticate_browser_session(
-        self, transaction: BrowserTransaction, clock: Clock, hasher: TokenHasher
-    ) -> AuthenticateSessionHandler:
-        return AuthenticateSessionHandler(transaction, clock, hasher.digest)
-
-    @provide(scope=Scope.REQUEST)
-    def rotate_browser_csrf(
-        self,
-        transaction: BrowserTransaction,
-        clock: Clock,
-        hasher: TokenHasher,
-        generator: TokenGenerator,
-    ) -> RotateCsrfHandler:
-        return RotateCsrfHandler(transaction, clock, hasher.digest, generator.generate)
-
-    @provide(scope=Scope.REQUEST)
-    def select_browser_project(
-        self,
-        transaction: BrowserTransaction,
-        clock: Clock,
-        hasher: TokenHasher,
-        generator: TokenGenerator,
-        settings: Settings,
-    ) -> SelectActiveProjectHandler:
-        return SelectActiveProjectHandler(
-            transaction, clock, hasher.digest, generator.generate, settings.browser_allowed_origins
-        )
-
-    @provide(scope=Scope.REQUEST)
-    def logout_browser_session(
-        self,
-        session: AsyncSession,
-        unit: SqlAlchemyUnitOfWork,
-        clock: Clock,
-        hasher: TokenHasher,
-        settings: Settings,
-    ) -> LogoutHandler:
-        repository = SQLAlchemyIdentityRepository(session)
-        return LogoutHandler(
-            repository,
-            repository,
-            IdentitySessionRevocationUnitOfWork(unit),
-            clock,
-            hasher.digest,
-            settings.browser_allowed_origins,
-        )
-
-    @provide(scope=Scope.REQUEST)
-    def logout_all_browser_sessions(
-        self,
-        session: AsyncSession,
-        unit: SqlAlchemyUnitOfWork,
-        clock: Clock,
-        hasher: TokenHasher,
-        settings: Settings,
-    ) -> RevokeAllSessionsHandler:
-        repository = SQLAlchemyIdentityRepository(session)
-        return RevokeAllSessionsHandler(
-            repository,
-            repository,
-            IdentitySessionRevocationUnitOfWork(unit),
-            clock,
-            hasher.digest,
-            settings.browser_allowed_origins,
-        )
-
-    @provide(scope=Scope.REQUEST)
-    def list_browser_sessions(
-        self, transaction: BrowserTransaction, clock: Clock, hasher: TokenHasher
-    ) -> ListSessionsHandler:
-        return ListSessionsHandler(transaction, clock, hasher.digest)
-
-    @provide(scope=Scope.REQUEST)
-    def revoke_browser_session(
-        self,
-        session: AsyncSession,
-        unit: SqlAlchemyUnitOfWork,
-        clock: Clock,
-        hasher: TokenHasher,
-        settings: Settings,
-    ) -> RevokeSessionHandler:
-        return RevokeSessionHandler(
-            SQLAlchemyIdentityRepository(session),
-            SQLAlchemySessionRevocationRepository(session),
-            IdentitySessionRevocationUnitOfWork(unit),
-            clock,
-            hasher.digest,
-            settings.browser_allowed_origins,
-        )
 
     @provide(scope=Scope.REQUEST)
     def change_browser_password(

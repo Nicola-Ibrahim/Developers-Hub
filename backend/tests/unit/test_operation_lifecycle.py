@@ -80,8 +80,8 @@ class FakeApiTokenRepository:
     async def find_token_credential(self, digest: str) -> ApiTokenAuthenticationDetails | None:
         return self.credential
 
-    async def ensure_developer_membership(
-        self, *, user_name: str, project_name: str, new_role: str
+    async def require_project_membership(
+        self, *, user_name: str, project_name: str
     ) -> ProjectMembershipStatus:
         return ProjectMembershipStatus(uuid4(), uuid4(), True)
 
@@ -468,7 +468,7 @@ def test_http_commit_failure_returns_503_without_success_response_start(monkeypa
     )
     session = FakeSession(fail_commit=SQLAlchemyError("database detail"))
     monkeypatch.setattr(
-        "identity.infra.composition.api_token_transactions.SQLAlchemyApiTokenRepository",
+        "composition.integrations.providers.api_token_repository_for_session",
         lambda active: repository,
     )
 

@@ -109,6 +109,7 @@ def test_logout_dispatch_resolves_from_fresh_identity_action_scope() -> None:
 
     scopes = []
     resolutions = []
+    events = []
 
     class LogoutActionHandler:
         async def execute(self, command: LogoutCommand) -> None:
@@ -123,6 +124,15 @@ def test_logout_dispatch_resolves_from_fresh_identity_action_scope() -> None:
 
         async def get(self, handler: type[object], component: str | None = None) -> object:
             resolutions.append((handler, component))
+            if handler is SqlAlchemyUnitOfWork:
+
+                class Unit:
+                    async def run(self, action, materialize):
+                        result = await action()
+                        events.append("commit")
+                        return materialize(result)
+
+                return Unit()
             return LogoutActionHandler()
 
     class Container:
@@ -143,10 +153,18 @@ def test_logout_dispatch_resolves_from_fresh_identity_action_scope() -> None:
 
     asyncio.run(run())
     assert scopes == [Scope.ACTION, Scope.ACTION]
-    assert resolutions == [(LogoutHandler, "identity_action")] * 2
+    assert (
+        resolutions
+        == [
+            (SqlAlchemyUnitOfWork, "identity_action"),
+            (LogoutHandler, "identity_action"),
+        ]
+        * 2
+    )
+    assert events == ["commit", "commit"]
 
 
-def test_bearer_query_uses_its_own_transaction_and_leaves_platform_unit_unused(monkeypatch) -> None:
+def test_bearer_query_uses_its_own_transaction_and_leaves_platform_unit_unused() -> None:
     now = datetime.now(UTC)
     events: list[str] = []
 
@@ -190,13 +208,11 @@ def test_bearer_query_uses_its_own_transaction_and_leaves_platform_unit_unused(m
         def digest(self, token):
             return "digest"
 
-    monkeypatch.setattr(
-        "identity.infra.composition.api_token_transactions.SQLAlchemyApiTokenRepository",
-        Repository,
-    )
     platform_unit = SqlAlchemyUnitOfWork(Session())
     operation = AuthenticateApiTokenHandler(
-        SqlAlchemyApiTokenTransaction(lambda: Session()), Hasher(), lambda: now
+        SqlAlchemyApiTokenTransaction(lambda: Session(), lambda active: Repository(active)),
+        Hasher(),
+        lambda: now,
     )
 
     async def run() -> None:

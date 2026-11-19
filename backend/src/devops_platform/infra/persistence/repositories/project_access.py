@@ -44,13 +44,6 @@ async def lock_named_project(session: AsyncSession, name: str) -> UUID | None:
     return project_id
 
 
-async def ensure_project_membership(
-    session: AsyncSession, user_id: UUID, project_id: UUID, role: str
-) -> None:
-    if await session.get(ProjectMembershipRow, (user_id, project_id)) is None:
-        session.add(ProjectMembershipRow(user_id=user_id, project_id=project_id, role=role))
-
-
 async def project_membership_role(
     session: AsyncSession, user_id: UUID, project_id: UUID
 ) -> str | None:

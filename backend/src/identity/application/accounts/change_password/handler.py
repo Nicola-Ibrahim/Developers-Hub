@@ -7,10 +7,7 @@ from datetime import datetime
 
 from identity.application.accounts.change_password.command import ChangePasswordCommand
 from identity.application.authentication.authenticate_session.handler import authenticate_session
-from identity.application.interfaces.browser_transactions import (
-    BrowserRepository,
-    BrowserTransaction,
-)
+from identity.application.interfaces.browser_transactions import BrowserTransaction
 from identity.application.interfaces.security import PasswordHasher
 from identity.application.shared.session_security import (
     BrowserMutationAuthorizer,
@@ -19,6 +16,8 @@ from identity.application.shared.session_security import (
 )
 from identity.domain.browser_credentials import validate_password
 from identity.domain.browser_errors import BrowserAuthenticationRejected
+from identity.domain.interfaces.session_repository import SessionRepository
+from identity.domain.interfaces.user_repository import UserRepository
 from identity.domain.records import AccountCredentials, SessionPrincipal
 
 
@@ -66,28 +65,31 @@ class ChangePasswordHandler:
         require_browser_origin(command.origin, self.allowed_origins)
 
         async def load_account(
-            repository: BrowserRepository,
+            users: UserRepository,
+            sessions: SessionRepository,
         ) -> tuple[SessionPrincipal, AccountCredentials | None]:
             principal = await authenticate_session(
-                repository, self.clock, self.digest_secret, command.session_token
+                sessions, self.clock, self.digest_secret, command.session_token
             )
-            return principal, await repository.find_login_account(principal.user_name)
+            return principal, await users.find_login_account(principal.user_name)
 
         principal, account = await self.transaction.run(load_account)
         prepared = await verify_password_change(
             self.passwords, account, command.current_password, command.new_password
         )
 
-        async def update_password(repository: BrowserRepository) -> None:
+        async def update_password(users: UserRepository, sessions: SessionRepository) -> None:
+            now = self.clock()
             await BrowserMutationAuthorizer(
-                repository, self.clock, self.digest_secret, self.allowed_origins
+                sessions, self.clock, self.digest_secret, self.allowed_origins
             ).authorize_mutation(command.session_token, command.csrf_token, command.origin)
-            if not await repository.change_password(
+            if not await users.change_password(
                 user_id=principal.user_id,
                 expected_version=prepared.credential_version,
                 password_hash=prepared.encoded_password,
-                now=self.clock(),
+                now=now,
             ):
                 raise BrowserAuthenticationRejected()
+            await sessions.revoke_user_sessions(principal.user_id, now)
 
         await self.transaction.run(update_password)

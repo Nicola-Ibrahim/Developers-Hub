@@ -2,31 +2,28 @@ from collections.abc import Callable
 from datetime import datetime
 
 from identity.application.authentication.authenticate_session.handler import authenticate_session
-from identity.application.interfaces.browser_transactions import (
-    BrowserRepository,
-    BrowserTransaction,
-)
 from identity.application.sessions.list_sessions.query import ListSessionsQuery
 from identity.application.sessions.list_sessions.result import SessionDetails
+from identity.domain.interfaces.session_repository import SessionRepository
 
 
 class ListSessionsHandler:
     def __init__(
         self,
-        transaction: BrowserTransaction,
+        repository: SessionRepository,
         clock: Callable[[], datetime],
         digest_secret: Callable[[str], str],
     ) -> None:
-        self.transaction = transaction
+        self.repository = repository
         self.clock = clock
         self.digest_secret = digest_secret
 
     async def execute(self, command: ListSessionsQuery) -> tuple[SessionDetails, ...]:
-        async def action(repository: BrowserRepository) -> tuple[SessionDetails, ...]:
+        async def action() -> tuple[SessionDetails, ...]:
             principal = await authenticate_session(
-                repository, self.clock, self.digest_secret, command.session_token
+                self.repository, self.clock, self.digest_secret, command.session_token
             )
-            sessions = await repository.list_sessions(
+            sessions = await self.repository.list_sessions(
                 principal.user_id, principal.session_id, self.clock()
             )
             return tuple(
@@ -41,4 +38,4 @@ class ListSessionsHandler:
                 for session in sessions
             )
 
-        return await self.transaction.run(action)
+        return await action()

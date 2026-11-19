@@ -50,7 +50,7 @@ class DevOpsHubAPI(FastAPI):
                 409: {"model": ErrorResponse},
                 401: {"model": ErrorResponse},
                 403: {"model": ErrorResponse},
-                422: {"model": ErrorResponse},
+                422: {"model": ErrorResponse, "description": "Unprocessable Content"},
                 503: {"model": ErrorResponse},
             },
         )

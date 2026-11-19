@@ -13,8 +13,8 @@ class ApiTokenRepository(Protocol):
 
     async def find_token_credential(self, digest: str) -> ApiTokenAuthenticationDetails | None: ...
 
-    async def ensure_developer_membership(
-        self, *, user_name: str, project_name: str, new_role: str
+    async def require_project_membership(
+        self, *, user_name: str, project_name: str
     ) -> ProjectMembershipStatus: ...
 
     async def insert_api_token(

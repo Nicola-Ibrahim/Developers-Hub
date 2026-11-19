@@ -161,7 +161,7 @@ def test_login_handler_commits_rejected_credentials_before_returning_rejection()
             events.append(("find", name))
             return None
 
-        async def complete_login(self, **values):
+        async def record_login_attempt(self, **values):
             events.append(("complete", values["accepted"]))
             return None
 
@@ -174,7 +174,7 @@ def test_login_handler_commits_rejected_credentials_before_returning_rejection()
     class Transaction:
         async def run(self, action):
             events.append("transaction-start")
-            result = await action(Repository())
+            result = await action(Repository(), Repository())
             events.append("transaction-commit")
             return result
 

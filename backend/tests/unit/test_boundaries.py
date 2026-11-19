@@ -48,19 +48,6 @@ IO_LIBRARIES = {
 # Shared PostgreSQL joins during the project-access ownership migration.
 # Application and domain imports remain isolated.
 SHARED_SCHEMA_IMPORTS = {
-    "identity.infra.persistence.repositories.accounts_sessions": {
-        "devops_platform.infra.persistence.repositories.project_access",
-        "devops_platform.infra.persistence.repositories.project_access.lock_user_project_access",
-        "devops_platform.infra.persistence.repositories.project_access.project_membership_role",
-        "devops_platform.infra.persistence.repositories.project_access.project_memberships",
-    },
-    "identity.infra.persistence.repositories.api_tokens": {
-        "devops_platform.infra.persistence.models.project_access",
-        "devops_platform.infra.persistence.models.project_access.ProjectMembershipRow",
-        "devops_platform.infra.persistence.repositories.project_access",
-        "devops_platform.infra.persistence.repositories.project_access.ensure_project_membership",
-        "devops_platform.infra.persistence.repositories.project_access.lock_named_project",
-    },
     "devops_platform.infra.persistence.repositories.project_access": {
         "identity.infra.persistence.models.user",
         "identity.infra.persistence.models.user.InternalUserRow",
@@ -148,7 +135,10 @@ def violation(module, target):
             "entrypoints",
         }
     if root == "api":
-        if target.startswith("shared.infra.readiness"):
+        if target in {
+            "shared.application.interfaces.readiness",
+            "shared.application.interfaces.readiness.ReadinessProbe",
+        }:
             return False
         if target == "shared.dispatch" or target.startswith("shared.dispatch."):
             return False

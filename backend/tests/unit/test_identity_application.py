@@ -24,10 +24,11 @@ TOKEN = "a" * 40
 
 
 class FakeRepository:
-    def __init__(self, credential=None, identity_active=True, token=None):
+    def __init__(self, credential=None, identity_active=True, token=None, membership_error=None):
         self.credential = credential
         self.identity_active = identity_active
         self.token = token
+        self.membership_error = membership_error
         self.user_id = uuid4()
         self.project_id = uuid4()
         self.issue_id = uuid4()
@@ -37,8 +38,10 @@ class FakeRepository:
         self.calls.append(("find_token_credential", digest))
         return self.credential
 
-    async def ensure_developer_membership(self, **kwargs):
-        self.calls.append(("ensure_developer_membership", kwargs))
+    async def require_project_membership(self, **kwargs):
+        self.calls.append(("require_project_membership", kwargs))
+        if self.membership_error is not None:
+            raise self.membership_error
         return ProjectMembershipStatus(self.user_id, self.project_id, self.identity_active)
 
     async def insert_api_token(self, **kwargs):
@@ -154,15 +157,11 @@ def test_issue_api_token_returns_private_completion_result_and_records_writes():
     assert prepared.secret == TOKEN
     assert TOKEN not in repr(prepared)
     assert [call[0] for call in repository.calls] == [
-        "ensure_developer_membership",
+        "require_project_membership",
         "insert_api_token",
         "record_token_audit",
     ]
-    assert repository.calls[0][1] == {
-        "user_name": "dev",
-        "project_name": "demo",
-        "new_role": "developer",
-    }
+    assert repository.calls[0][1] == {"user_name": "dev", "project_name": "demo"}
     assert repository.calls[1][1]["digest"] == token_digest(TOKEN, "p" * 32)
     assert repository.calls[2][1].action == "token_issued"
 
@@ -186,7 +185,18 @@ def test_issue_api_token_rejects_disabled_user_before_token_or_audit():
     repository = FakeRepository(identity_active=False)
     with pytest.raises(IdentityValidationError):
         asyncio.run(issue_service(repository).execute(IssueApiTokenCommand("dev", "demo")))
-    assert [call[0] for call in repository.calls] == ["ensure_developer_membership"]
+    assert [call[0] for call in repository.calls] == ["require_project_membership"]
+
+
+def test_issue_api_token_rejects_missing_membership_before_token_or_audit():
+    repository = FakeRepository(
+        membership_error=IdentityValidationError(
+            "Active account and current project membership are required"
+        )
+    )
+    with pytest.raises(IdentityValidationError):
+        asyncio.run(issue_service(repository).execute(IssueApiTokenCommand("dev", "demo")))
+    assert [call[0] for call in repository.calls] == ["require_project_membership"]
 
 
 def test_revoke_api_token_is_idempotent_and_audits_only_first_revoke():

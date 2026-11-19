@@ -44,6 +44,7 @@ from devops_platform.application.software_delivery.retry_delivery_step.command i
 )
 from devops_platform.authorization import ALL_SCOPES, authorize_platform_action
 from devops_platform.infra.composition.module import DeveloperPlatformModuleDispatcher
+from identity.domain.interfaces.project_access import IdentityProjectAccess
 from shared.dispatch import Command, Query
 from shared.infra.clock import Clock
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork
@@ -120,6 +121,9 @@ class PlatformRequestModule(DeveloperPlatformModule):
         token: RequestIdentity = getattr(self._request.state, "request_identity", None)
         async with self._container(scope=Scope.ACTION) as action_container:
             unit = await action_container.get(SqlAlchemyUnitOfWork, component=_ACTION_COMPONENT)
+            project_access = await action_container.get(
+                IdentityProjectAccess, component=_ACTION_COMPONENT
+            )
             inner = DeveloperPlatformModuleDispatcher(
                 lambda handler_type: action_container.get(handler_type, component=_ACTION_COMPONENT)
             )
@@ -134,6 +138,7 @@ class PlatformRequestModule(DeveloperPlatformModule):
                         None,
                         self._clock,
                         token_pepper=self._settings.token_pepper.get_secret_value(),
+                        project_access=project_access,
                     )
                     accesses = tuple(
                         AccessContext(
@@ -160,6 +165,7 @@ class PlatformRequestModule(DeveloperPlatformModule):
                             self._settings.browser_allowed_origins,
                             isinstance(message, _MUTATING_BROWSER_MESSAGES),
                             self._settings.token_pepper.get_secret_value(),
+                            project_access=project_access,
                         )
                         if principal.project_id is None or principal.role not in {
                             "developer",
@@ -176,7 +182,7 @@ class PlatformRequestModule(DeveloperPlatformModule):
                         )
                     else:
                         access = await authenticate_platform_access(
-                            unit.session, token, self._settings, self._clock
+                            unit.session, token, self._settings, self._clock, project_access
                         )
                     if isinstance(message, ReadProjects):
                         current = cast(MessageT, replace(message, accesses=(access,)))

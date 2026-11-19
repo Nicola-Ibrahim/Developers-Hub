@@ -3,7 +3,6 @@ from datetime import datetime
 from uuid import UUID
 
 from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
-from identity.application.interfaces.browser_transactions import BrowserTransaction
 from identity.domain.browser_errors import BrowserAuthenticationRejected
 from identity.domain.interfaces.session_repository import SessionRepository
 from identity.domain.records import SessionPrincipal
@@ -29,21 +28,19 @@ async def authenticate_session(
 class AuthenticateSessionHandler:
     def __init__(
         self,
-        transaction: BrowserTransaction,
+        repository: SessionRepository,
         clock: Callable[[], datetime],
         digest_secret: Callable[[str], str],
     ) -> None:
-        self.transaction = transaction
+        self.repository = repository
         self.clock = clock
         self.digest_secret = digest_secret
 
     async def execute(self, query: AuthenticateSessionQuery) -> SessionPrincipal:
-        return await self.transaction.run(
-            lambda repository: authenticate_session(
-                repository,
-                self.clock,
-                self.digest_secret,
-                query.session_token,
-                query.project_id,
-            )
+        return await authenticate_session(
+            self.repository,
+            self.clock,
+            self.digest_secret,
+            query.session_token,
+            query.project_id,
         )

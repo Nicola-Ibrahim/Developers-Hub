@@ -8,6 +8,8 @@ from identity.application.accounts.complete_password_setup.command import (
 from identity.application.interfaces.browser_transactions import BrowserTransaction
 from identity.application.interfaces.security import PasswordHasher
 from identity.domain.browser_credentials import validate_password
+from identity.domain.interfaces.session_repository import SessionRepository
+from identity.domain.interfaces.user_repository import UserRepository
 
 Clock = Callable[[], datetime]
 
@@ -30,8 +32,15 @@ class CompletePasswordSetupHandler:
     async def execute(self, command: CompletePasswordSetupCommand) -> bool:
         validate_password(command.new_password)
         encoded = await asyncio.to_thread(self.passwords.hash, command.new_password)
-        return await self.transaction.run(
-            lambda repo: repo.consume_password_setup(
-                digest=self.digest_secret(command.secret), password_hash=encoded, now=self.clock()
+
+        async def consume(users: UserRepository, sessions: SessionRepository) -> bool:
+            now = self.clock()
+            user_id = await users.consume_password_setup(
+                digest=self.digest_secret(command.secret), password_hash=encoded, now=now
             )
-        )
+            if user_id is None:
+                return False
+            await sessions.revoke_user_sessions(user_id, now)
+            return True
+
+        return await self.transaction.run(consume)

@@ -32,7 +32,7 @@ class Transaction:
         self.repository = repository
 
     async def run(self, action):
-        return await action(self.repository)
+        return await action(self.repository, None)
 
 
 class Passwords:
@@ -113,7 +113,7 @@ def test_session_refresh_is_explicitly_a_command() -> None:
     repository = Repository()
     result = asyncio.run(
         AuthenticateSessionHandler(
-            Transaction(repository), lambda: NOW, lambda value: f"digest:{value}"
+            repository, lambda: NOW, lambda value: f"digest:{value}"
         ).execute(AuthenticateSessionQuery("private-session"))
     )
 

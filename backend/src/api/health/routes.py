@@ -9,7 +9,7 @@ from identity.application.interfaces.authorization import (
     AuthorizationDecisionPort,
     AuthorizationUnavailable,
 )
-from shared.infra.readiness import ReadinessProbe
+from shared.application.interfaces.readiness import ReadinessProbe
 
 router = APIRouter()
 

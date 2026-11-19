@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timedelta
+from uuid import UUID
 
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.result import LoginResult
@@ -13,6 +14,9 @@ from identity.application.interfaces.security import TokenGenerator
 from identity.application.shared.session_security import require_browser_origin
 from identity.domain.aggregates.user import User
 from identity.domain.browser_errors import BrowserAuthenticationRejected
+from identity.domain.interfaces.session_repository import SessionRepository
+from identity.domain.interfaces.user_repository import UserRepository
+from identity.domain.records import AccountCredentials, SessionPrincipal
 from identity.domain.value_objects.credential_version import CredentialVersion
 from identity.domain.value_objects.user_name import UserName
 
@@ -39,7 +43,13 @@ class LoginHandler:
     async def execute(self, command: LoginCommand) -> LoginResult:
         require_browser_origin(command.origin, self.allowed_origins)
         name = UserName.parse(command.user_name).value
-        account = await self.transaction.run(lambda repo: repo.find_login_account(name))
+
+        async def read_account(
+            users: UserRepository, _sessions: SessionRepository
+        ) -> AccountCredentials | None:
+            return await users.find_login_account(name)
+
+        account = await self.transaction.run(read_account)
         password_matches = await self.credential_verifier.verify(
             command.password, account.password_hash if account is not None else None
         )
@@ -64,33 +74,52 @@ class LoginHandler:
             now + timedelta(hours=8),
         )
         csrf = self.tokens.generate()
-        result = await self.transaction.run(
-            lambda repo: repo.complete_login(
+
+        async def complete_login(
+            users: UserRepository, sessions: SessionRepository
+        ) -> tuple[SessionPrincipal, UUID, datetime] | None:
+            login_account = await users.record_login_attempt(
                 user_name=name,
                 username_digest=self.digest(name),
                 expected_version=(
                     identity_account.login_fence() if identity_account is not None else None
                 ),
                 accepted=accepted,
+                now=now,
+            )
+            if login_account is None:
+                return None
+            user_id, user_name, credential_version = login_account
+            return await sessions.create_login_session(
+                user_id=user_id,
+                user_name=user_name,
+                credential_version=credential_version,
                 token_digest=self.digest(token),
                 csrf_digest=self.digest(csrf),
                 now=now,
             )
-        )
+
+        result = await self.transaction.run(complete_login)
         if result is None:
             raise BrowserAuthenticationRejected()
         principal, _, expires = result
         project_id = command.project_id
         if project_id is not None:
-            selected = await self.transaction.run(
-                lambda repo: repo.select_project(
+
+            async def select_project(
+                _users: UserRepository, sessions: SessionRepository
+            ) -> SessionPrincipal | None:
+                return await sessions.select_project(
                     token_digest=self.digest(token), project_id=project_id, now=self.clock()
                 )
-            )
+
+            selected = await self.transaction.run(select_project)
             if selected is None:
-                await self.transaction.run(
-                    lambda repo: repo.logout(self.digest(token), self.clock())
-                )
+
+                async def revoke_login(_users: UserRepository, sessions: SessionRepository) -> None:
+                    await sessions.logout(self.digest(token), self.clock())
+
+                await self.transaction.run(revoke_login)
                 raise BrowserAuthenticationRejected()
             principal = selected
         return LoginResult(token, csrf, replace(principal, csrf_token=csrf), expires)

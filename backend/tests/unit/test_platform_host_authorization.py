@@ -16,6 +16,7 @@ from devops_platform.application.resource_management.get_resource.query import (
 )
 from devops_platform.application.shared.errors import CatalogForbidden
 from devops_platform.domain.value_objects.access_context import AccessContext
+from identity.domain.interfaces.project_access import IdentityProjectAccess
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
 
@@ -49,6 +50,8 @@ def test_http_host_rechecks_trusted_access_and_rolls_back_denial(monkeypatch) ->
             return False
 
         async def get(self, kind, *, component=""):
+            if kind is IdentityProjectAccess:
+                return object()
             if kind is SqlAlchemyUnitOfWork:
                 assert component == "platform_action"
                 return Unit()
@@ -101,6 +104,8 @@ def test_http_host_dispatches_with_authenticated_actor_not_message_claims(monkey
             return False
 
         async def get(self, kind, *, component=""):
+            if kind is IdentityProjectAccess:
+                return object()
             if kind is SqlAlchemyUnitOfWork:
                 assert component == "platform_action"
                 return Unit()

@@ -18,6 +18,7 @@ from sqlalchemy.pool import NullPool
 
 from api.app import create_app
 from composition.container import BackendContainer
+from composition.integrations.project_access_persistence import api_token_repository_for_session
 from composition.integrations.project_registration import RegisterProjectCommandHandler
 from devops_platform.application.projects.command import RegisterProjectCommand
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
@@ -29,7 +30,6 @@ from identity.application.shared.errors import CredentialDeliveryError
 from identity.infra.composition.api_token_transactions import IssueApiTokenToFile
 from identity.infra.persistence.models.api_token import ApiAccessTokenRow
 from identity.infra.persistence.models.user import InternalUserRow
-from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
 from identity.infra.security.credential_file import PrivateCredentialFile
 from migrations.metadata import registered_metadata
 from shared.infra.persistence.audit import AuditEvent
@@ -108,10 +108,30 @@ def register_project(sync_engine, project, config=None):
         asyncio.run(database.dispose())
 
 
+def prepare_token_membership(sync_engine, user, project):
+    with Session(sync_engine) as session, session.begin():
+        project_row = session.scalar(select(ProjectRow).where(ProjectRow.name == project))
+        assert project_row is not None
+        user_row = session.scalar(select(InternalUserRow).where(InternalUserRow.name == user))
+        if user_row is None:
+            user_row = InternalUserRow(name=user)
+            session.add(user_row)
+            session.flush()
+        if session.get(ProjectMembershipRow, (user_row.id, project_row.id)) is None:
+            session.add(
+                ProjectMembershipRow(
+                    user_id=user_row.id,
+                    project_id=project_row.id,
+                    role="developer",
+                )
+            )
+
+
 def issue(sync_engine, path, user="developer", project="project", **kwargs):
     database = async_engine_for(sync_engine)
     try:
         asyncio.run(register_project_with_container(database, settings(), project))
+        prepare_token_membership(sync_engine, user, project)
         token_id = asyncio.run(
             issue_with_container(database, path, settings(), user, project, **kwargs)
         )
@@ -213,9 +233,9 @@ def test_existing_output_does_not_get_overwritten_or_commit_identity(postgres_en
         issue(postgres_engine, output, user="new", project="new")
     assert output.read_text() == "original"
     with Session(postgres_engine) as session:
-        assert session.scalar(select(func.count()).select_from(InternalUserRow)) == 0
+        assert session.scalar(select(func.count()).select_from(InternalUserRow)) == 1
         assert session.scalar(select(func.count()).select_from(ApiAccessTokenRow)) == 0
-        assert session.scalar(select(func.count()).select_from(ProjectMembershipRow)) == 0
+        assert session.scalar(select(func.count()).select_from(ProjectMembershipRow)) == 1
         assert session.scalar(select(func.count()).select_from(AuditEvent)) == 0
         # Trusted project registration is a separate, prior operator operation.
         assert session.scalar(select(func.count()).select_from(ProjectRow)) == 1
@@ -228,6 +248,7 @@ def test_failed_commit_removes_new_token_file(postgres_engine, tmp_path):
     output = tmp_path / "credential"
     database = async_engine_for(postgres_engine)
     asyncio.run(register_project_with_container(database, settings(), "new"))
+    prepare_token_membership(postgres_engine, "new", "new")
     event.listen(database.sync_engine, "commit", fail_commit)
     try:
         with pytest.raises(RuntimeError):
@@ -237,7 +258,10 @@ def test_failed_commit_removes_new_token_file(postgres_engine, tmp_path):
         asyncio.run(database.dispose())
     assert not output.exists()
     with Session(postgres_engine) as session:
+        assert session.scalar(select(func.count()).select_from(InternalUserRow)) == 1
+        assert session.scalar(select(func.count()).select_from(ProjectMembershipRow)) == 1
         assert session.scalar(select(func.count()).select_from(ApiAccessTokenRow)) == 0
+        assert session.scalar(select(func.count()).select_from(AuditEvent)) == 0
 
 
 def test_readiness_requires_expected_migration(postgres_engine):
@@ -291,7 +315,7 @@ def test_pre_refactor_token_digest_still_authenticates(postgres_engine, tmp_path
         )
 
 
-def test_disabled_issuance_rolls_back_membership_for_registered_project(postgres_engine, tmp_path):
+def test_disabled_account_cannot_receive_token_for_current_membership(postgres_engine, tmp_path):
     token_id, _ = issue(postgres_engine, tmp_path / "credential")
     from devops_platform.infra.persistence.models.project_access import ProjectRow
     from identity.domain.errors import IdentityValidationError
@@ -306,9 +330,40 @@ def test_disabled_issuance_rolls_back_membership_for_registered_project(postgres
     with Session(postgres_engine) as session:
         # Project registration is already committed independently of identity token issuance.
         assert session.scalar(select(func.count()).select_from(ProjectRow)) == 2
-        assert session.scalar(select(func.count()).select_from(ProjectMembershipRow)) == 1
+        assert session.scalar(select(func.count()).select_from(ProjectMembershipRow)) == 2
         assert session.scalar(select(func.count()).select_from(AuditEvent)) == 1
     assert not (tmp_path / "second").exists()
+
+
+@pytest.mark.parametrize("account_exists", [False, True])
+def test_token_issuance_does_not_create_missing_account_or_membership(
+    postgres_engine, tmp_path, account_exists
+):
+    register_project(postgres_engine, "existing-project")
+    if account_exists:
+        with Session(postgres_engine) as session, session.begin():
+            session.add(InternalUserRow(name="unprovisioned"))
+    output = tmp_path / "credential"
+    database = async_engine_for(postgres_engine)
+    try:
+        from identity.domain.errors import IdentityValidationError
+
+        with pytest.raises(IdentityValidationError):
+            asyncio.run(
+                issue_with_container(
+                    database, output, settings(), "unprovisioned", "existing-project"
+                )
+            )
+    finally:
+        asyncio.run(database.dispose())
+    assert not output.exists()
+    with Session(postgres_engine) as session:
+        assert session.scalar(select(func.count()).select_from(InternalUserRow)) == int(
+            account_exists
+        )
+        assert session.scalar(select(func.count()).select_from(ProjectMembershipRow)) == 0
+        assert session.scalar(select(func.count()).select_from(ApiAccessTokenRow)) == 0
+        assert session.scalar(select(func.count()).select_from(AuditEvent)) == 0
 
 
 def test_revoke_is_idempotent_and_does_not_duplicate_audit(postgres_engine, tmp_path):
@@ -337,7 +392,7 @@ def test_concurrent_token_revocation_preserves_first_timestamp_and_single_audit(
         async def run(self, action):
             async with sessions() as session:
                 unit = SqlAlchemyUnitOfWork(session)
-                repository = SQLAlchemyApiTokenRepository(session)
+                repository = api_token_repository_for_session(session)
 
                 class PausingRepository:
                     async def find_api_token(self, token_id):
@@ -361,7 +416,7 @@ def test_concurrent_token_revocation_preserves_first_timestamp_and_single_audit(
         async def run(self, action):
             async with sessions() as session:
                 unit = SqlAlchemyUnitOfWork(session)
-                repository = SQLAlchemyApiTokenRepository(session)
+                repository = api_token_repository_for_session(session)
 
                 async def run_action():
                     backend_pids["second"] = await session.scalar(text("SELECT pg_backend_pid()"))

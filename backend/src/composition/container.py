@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from api.composition.providers import ApiCompositionProvider
 from composition.integrations.providers import (
     CrossContextIntegrationProvider,
+    IdentityActionIntegrationProvider,
     PlatformActionIntegrationProvider,
 )
 from devops_platform.authorization import ALL_SCOPES
@@ -68,6 +69,7 @@ class BackendContainer:
         return make_async_container(
             RuntimeContext(),
             CrossContextIntegrationProvider(),
+            IdentityActionIntegrationProvider(component="identity_action"),
             PlatformActionIntegrationProvider(component="platform_action"),
             DatabaseProvider(),
             RuntimeClockProvider(),

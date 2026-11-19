@@ -23,7 +23,7 @@ from identity.application.interfaces.browser_tokens import BrowserSessionTokenVe
 from identity.application.interfaces.dispatch import IdentityModule
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.infra.security.tokens import token_digest
-from shared.infra.readiness import ReadinessProbe
+from shared.application.interfaces.readiness import ReadinessProbe
 from shared.infra.settings import Settings
 
 

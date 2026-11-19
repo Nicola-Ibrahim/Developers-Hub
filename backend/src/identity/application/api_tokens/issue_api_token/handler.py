@@ -45,10 +45,9 @@ class IssueApiTokenHandler:
 
         now = self.clock()
         secret = self.generator.generate()
-        identity = await self.repository.ensure_developer_membership(
+        identity = await self.repository.require_project_membership(
             user_name=command.user_name,
             project_name=command.project_name,
-            new_role="developer",
         )
         if not identity.user_active:
             raise IdentityValidationError("Cannot issue a token for a disabled user")

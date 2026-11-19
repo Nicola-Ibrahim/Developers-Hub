@@ -47,6 +47,14 @@ class AccountCredentials:
 
 
 @dataclass(frozen=True)
+class AccountSessionDetails:
+    user_id: UUID
+    user_name: str
+    active: bool
+    credential_version: int
+
+
+@dataclass(frozen=True)
 class SessionPrincipal:
     user_id: UUID
     user_name: str

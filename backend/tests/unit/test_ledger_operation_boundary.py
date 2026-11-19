@@ -79,7 +79,7 @@ def test_http_ledger_authentication_and_commit_precede_success(outcome, monkeypa
                 user, project, token_id, "developer", frozenset({"resources:write"})
             )
 
-    async def authenticate(active_session, token, settings, clock):
+    async def authenticate(active_session, token, settings, clock, project_access):
         assert active_session is session
         assert session.events == ["begin"]
         assert token == "synthetic-raw-bearer-token-for-operation"
