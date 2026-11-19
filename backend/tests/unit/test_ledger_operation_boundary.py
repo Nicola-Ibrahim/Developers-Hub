@@ -36,12 +36,25 @@ def test_platform_di_binds_both_context_repositories_to_one_operation_session():
     async def run():
         try:
             async with container() as scope:
-                request = await scope.get(RequestTemporaryDatabaseHandler)
-                read = await scope.get(ReadResourcesHandler)
-                unit = await scope.get(SqlAlchemyUnitOfWork)
-                assert request.repository._session is read.repository._session
-                assert read.repository._session is unit.session
-                await unit.session.close()
+                snapshots = []
+                for _ in range(2):
+                    async with scope(scope=Scope.ACTION) as action_scope:
+                        request = await action_scope.get(
+                            RequestTemporaryDatabaseHandler, component="platform_action"
+                        )
+                        read = await action_scope.get(
+                            ReadResourcesHandler, component="platform_action"
+                        )
+                        unit = await action_scope.get(
+                            SqlAlchemyUnitOfWork, component="platform_action"
+                        )
+                        assert request.repository._session is read.repository._session
+                        assert read.repository._session is unit.session
+                        snapshots.append((request.repository, read.repository, unit.session))
+                        await unit.session.close()
+                assert snapshots[0][0] is not snapshots[1][0]
+                assert snapshots[0][1] is not snapshots[1][1]
+                assert snapshots[0][2] is not snapshots[1][2]
         finally:
             await container.close()
 
@@ -95,18 +108,22 @@ def test_http_ledger_authentication_and_commit_precede_success(outcome, monkeypa
         def identity(self) -> IdentityModule:
             return Identity()
 
-        @provide(scope=Scope.REQUEST, override=True)
+    class ActionOverride(Provider):
+        @provide(scope=Scope.ACTION, override=True)
         def unit(self) -> SqlAlchemyUnitOfWork:
             return unit
 
-        @provide(scope=Scope.REQUEST, override=True)
+        @provide(scope=Scope.ACTION, override=True)
         def request_handler(self) -> RequestTemporaryDatabaseHandler:
             return requester
 
     config = Settings(
         database_url="postgresql+psycopg://localhost:1/devops_hub_test", token_pepper="p" * 40
     )
-    container = BackendContainer(config, overrides=(Override(),)).combined()
+    container = BackendContainer(
+        config,
+        overrides=(Override(), ActionOverride(component="platform_action")),
+    ).combined()
     capture = CapturedResponses(create_app(container=container))
     try:
         with TestClient(capture) as client:

@@ -7,7 +7,10 @@ from dishka.integrations.fastapi import FastapiProvider
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from api.composition.providers import ApiCompositionProvider
-from composition.integrations.providers import CrossContextIntegrationProvider
+from composition.integrations.providers import (
+    CrossContextIntegrationProvider,
+    PlatformActionIntegrationProvider,
+)
 from devops_platform.authorization import ALL_SCOPES
 from devops_platform.infra.composition.container import DeveloperPlatformContainer
 from identity.infra.composition.container import IdentityContainer
@@ -65,6 +68,7 @@ class BackendContainer:
         return make_async_container(
             RuntimeContext(),
             CrossContextIntegrationProvider(),
+            PlatformActionIntegrationProvider(component="platform_action"),
             DatabaseProvider(),
             RuntimeClockProvider(),
             *self._identity.providers(),

@@ -15,9 +15,12 @@ from identity.application.authentication.authenticate_session.query import Authe
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.handler import LoginHandler
 from identity.application.authentication.logout.command import LogoutCommand
+from identity.application.authentication.logout.handler import LogoutHandler
 from identity.application.sessions.list_sessions.query import ListSessionsQuery
 from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand
+from identity.application.sessions.revoke_all_sessions.handler import RevokeAllSessionsHandler
 from identity.application.sessions.revoke_session.command import RevokeSessionCommand
+from identity.application.sessions.revoke_session.handler import RevokeSessionHandler
 from identity.application.sessions.rotate_csrf.command import RotateCsrfCommand
 from identity.application.sessions.select_active_project.command import (
     SelectActiveProjectCommand,
@@ -39,6 +42,9 @@ def test_identity_messages_have_explicit_complete_registrations() -> None:
         IDENTITY_HANDLER_REGISTRY.queries[AuthenticateApiTokenQuery] is AuthenticateApiTokenHandler
     )
     assert IDENTITY_HANDLER_REGISTRY.commands[LoginCommand] is LoginHandler
+    assert IDENTITY_HANDLER_REGISTRY.commands[LogoutCommand] is LogoutHandler
+    assert IDENTITY_HANDLER_REGISTRY.commands[RevokeAllSessionsCommand] is RevokeAllSessionsHandler
+    assert IDENTITY_HANDLER_REGISTRY.commands[RevokeSessionCommand] is RevokeSessionHandler
     assert set(IDENTITY_HANDLER_REGISTRY.commands) == {
         LoginCommand,
         RotateCsrfCommand,
@@ -96,6 +102,48 @@ def test_identity_dispatch_resolves_only_selected_handler() -> None:
         assert resolved == [LoginHandler]
 
     asyncio.run(run())
+
+
+def test_logout_dispatch_resolves_from_fresh_identity_action_scope() -> None:
+    from dishka import Scope
+
+    scopes = []
+    resolutions = []
+
+    class LogoutActionHandler:
+        async def execute(self, command: LogoutCommand) -> None:
+            return None
+
+    class ActionContainer:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, handler: type[object], component: str | None = None) -> object:
+            resolutions.append((handler, component))
+            return LogoutActionHandler()
+
+    class Container:
+        async def get(self, handler: type[object]) -> object:
+            raise AssertionError(f"non-action handler requested: {handler}")
+
+        def __call__(self, *, scope: Scope) -> ActionContainer:
+            scopes.append(scope)
+            return ActionContainer()
+
+    async def run() -> None:
+        dispatcher = IdentityModuleDispatcher(Container())
+        for _ in range(2):
+            assert (
+                await dispatcher.execute(LogoutCommand("token", "csrf", "https://portal.example"))
+                is None
+            )
+
+    asyncio.run(run())
+    assert scopes == [Scope.ACTION, Scope.ACTION]
+    assert resolutions == [(LogoutHandler, "identity_action")] * 2
 
 
 def test_bearer_query_uses_its_own_transaction_and_leaves_platform_unit_unused(monkeypatch) -> None:

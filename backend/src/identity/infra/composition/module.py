@@ -1,6 +1,8 @@
 """Explicit identity message registration and lazy module dispatch."""
 
-from dishka import AsyncContainer
+from typing import TypeVar, cast
+
+from dishka import AsyncContainer, Scope
 
 from identity.application.accounts.change_password.command import ChangePasswordCommand
 from identity.application.accounts.change_password.handler import ChangePasswordHandler
@@ -30,7 +32,9 @@ from identity.application.sessions.select_active_project.command import (
 from identity.application.sessions.select_active_project.handler import (
     SelectActiveProjectHandler,
 )
-from shared.dispatch import HandlerRegistry, ModuleDispatcher
+from shared.dispatch import Command, HandlerRegistry, ModuleDispatcher
+
+ResultT = TypeVar("ResultT")
 
 IDENTITY_HANDLER_REGISTRY = HandlerRegistry(
     commands=(
@@ -66,4 +70,18 @@ IDENTITY_HANDLER_REGISTRY = HandlerRegistry(
 
 class IdentityModuleDispatcher(ModuleDispatcher):
     def __init__(self, container: AsyncContainer) -> None:
+        self._container = container
         super().__init__(IDENTITY_HANDLER_REGISTRY, container.get)
+
+    async def execute(self, command: Command[ResultT]) -> ResultT:
+        if not isinstance(command, (LogoutCommand, RevokeAllSessionsCommand, RevokeSessionCommand)):
+            return await super().execute(command)
+
+        async with self._container(scope=Scope.ACTION) as action_container:
+            dispatcher = ModuleDispatcher(
+                IDENTITY_HANDLER_REGISTRY,
+                lambda handler_type: action_container.get(
+                    handler_type, component="identity_action"
+                ),
+            )
+            return await dispatcher.execute(cast(Command[ResultT], command))

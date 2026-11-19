@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for
 
@@ -32,12 +32,38 @@ from devops_platform.infra.persistence.models.resources import (
     ResourceSecret,
 )
 from devops_platform.infra.persistence.repositories.resource import SQLAlchemyResourceRepository
-from devops_platform.infra.persistence.repositories.worker_queue import SqlAlchemyProvisioningQueue
+from devops_platform.infra.persistence.repositories.worker_queue import (
+    PostgresResourceEffectGuard,
+    SqlAlchemyProvisioningQueue,
+)
 from devops_platform.infra.security.credentials import FernetResourceCredentialCipher
 from identity.infra.persistence.models.user import InternalUserRow
 
 pytestmark = pytest.mark.postgres
 KEY = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+
+
+def test_effect_guard_fences_concurrent_work_without_occupying_the_pool(postgres_engine):
+    async def exercise():
+        engine = create_async_engine(
+            postgres_engine.url, pool_size=1, max_overflow=0, pool_timeout=1
+        )
+        guard = PostgresResourceEffectGuard(engine)
+        resource_id = uuid4()
+        try:
+            async with guard(resource_id) as acquired:
+                assert acquired
+                assert engine.pool.checkedout() == 0
+                async with guard(resource_id) as competing:
+                    assert not competing
+                async with engine.connect() as connection:
+                    assert await connection.scalar(select(1)) == 1
+            async with guard(resource_id) as reacquired:
+                assert reacquired
+        finally:
+            await engine.dispose()
+
+    asyncio.run(exercise())
 
 
 def seed_resource(engine, *, status="pending", expires_in=3600, action="provision"):

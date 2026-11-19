@@ -2,11 +2,12 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from dishka import Provider, Scope, make_async_container, provide
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from composition.container import BackendContainer
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
+from identity.application.interfaces.security import TokenHasher
 from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand
 from identity.application.sessions.revoke_all_sessions.handler import RevokeAllSessionsHandler
 from identity.application.sessions.revoke_session.command import RevokeSessionCommand
@@ -14,6 +15,10 @@ from identity.application.sessions.revoke_session.handler import RevokeSessionHa
 from identity.domain.aggregates.session import Session
 from identity.domain.records import SessionPrincipal
 from identity.domain.value_objects.session_expiry import SessionExpiry
+from identity.infra.composition.action_provider import IdentityActionProvider
+from identity.infra.composition.providers import IdentityProvider
+from shared.infra.clock import Clock
+from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
 
 
@@ -92,27 +97,29 @@ def test_revoke_handler_repositories_and_uow_share_request_session() -> None:
     config = Settings(
         database_url="postgresql+psycopg://localhost:1/devops_hub_test", token_pepper="t" * 40
     )
-    container = BackendContainer(config).combined()
+    provider = IdentityProvider()
+    session = object()
+    unit = SqlAlchemyUnitOfWork(session)
 
-    async def verify() -> None:
-        try:
-            async with container() as scope:
-                handler = await scope.get(RevokeSessionHandler)
-                logout = await scope.get(LogoutHandler)
-                revoke_all = await scope.get(RevokeAllSessionsHandler)
-                session = await scope.get(AsyncSession)
-                assert handler.authorization._session is session
-                assert handler.revocations._session is session
-                assert handler.unit._unit.session is session
-                for operation in (logout, revoke_all):
-                    assert operation.authorization._session is session
-                    assert operation.sessions._session is session
-                    assert operation.unit._unit.session is session
-                await session.close()
-        finally:
-            await container.close()
+    def clock():
+        return datetime(2026, 1, 1, tzinfo=UTC)
 
-    asyncio.run(verify())
+    class Hasher:
+        @staticmethod
+        def digest(value: str) -> str:
+            return value
+
+    logout = provider.logout_browser_session(session, unit, clock, Hasher(), config)
+    revoke_all = provider.logout_all_browser_sessions(session, unit, clock, Hasher(), config)
+    revoke = provider.revoke_browser_session(session, unit, clock, Hasher(), config)
+
+    assert revoke.authorization._session is session
+    assert revoke.revocations._session is session
+    assert revoke.unit._unit.session is session
+    for operation in (logout, revoke_all):
+        assert operation.authorization._session is session
+        assert operation.sessions._session is session
+        assert operation.unit._unit.session is session
 
 
 def test_logout_and_revoke_all_authorize_before_writing_in_unit_of_work() -> None:
@@ -176,3 +183,67 @@ def test_logout_and_revoke_all_authorize_before_writing_in_unit_of_work() -> Non
         ("csrf", ("session-digest", "csrf-digest")),
         ("logout_all", (user_id, now)),
     ]
+
+
+def test_identity_action_handlers_get_fresh_sessions_and_share_each_uow_session() -> None:
+    created_sessions = []
+
+    class FakeSession:
+        async def close(self):
+            return None
+
+    class SessionFactory:
+        def __call__(self):
+            session = FakeSession()
+            created_sessions.append(session)
+            return session
+
+    session_factory = SessionFactory()
+    config = Settings(
+        database_url="postgresql+psycopg://localhost:1/devops_hub_test", token_pepper="t" * 40
+    )
+
+    class Hasher:
+        @staticmethod
+        def digest(value: str) -> str:
+            return value
+
+    class RootProvider(Provider):
+        @provide(scope=Scope.APP)
+        def sessions(self) -> async_sessionmaker[AsyncSession]:
+            return session_factory
+
+        @provide(scope=Scope.APP)
+        def clock(self) -> Clock:
+            return lambda: datetime(2026, 1, 1, tzinfo=UTC)
+
+        @provide(scope=Scope.APP)
+        def hasher(self) -> TokenHasher:
+            return Hasher()
+
+        @provide(scope=Scope.APP)
+        def settings(self) -> Settings:
+            return config
+
+    async def verify() -> None:
+        container = make_async_container(
+            RootProvider(), IdentityActionProvider(component="identity_action")
+        )
+        try:
+            for handler_type in (LogoutHandler, RevokeAllSessionsHandler, RevokeSessionHandler):
+                async with container(scope=Scope.ACTION) as action:
+                    handler = await action.get(handler_type, component="identity_action")
+                    session = created_sessions[-1]
+                    if handler_type is RevokeSessionHandler:
+                        assert handler.authorization._session is session
+                        assert handler.revocations._session is session
+                    else:
+                        assert handler.authorization._session is session
+                        assert handler.sessions._session is session
+                    assert handler.unit._unit.session is session
+            assert len(created_sessions) == 3
+            assert len({id(session) for session in created_sessions}) == 3
+        finally:
+            await container.close()
+
+    asyncio.run(verify())

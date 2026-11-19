@@ -56,3 +56,11 @@ class CrossContextIntegrationProvider(Provider):
         unit: SqlAlchemyUnitOfWork,
     ) -> RegisterProjectCommandHandler:
         return RegisterProjectCommandHandler(directory, register, unit)
+
+
+class PlatformActionIntegrationProvider(Provider):
+    """Bind cross-context Platform adapters to the per-operation SQL session."""
+
+    @provide(scope=Scope.ACTION, provides=ProjectAccessRepository)
+    def project_access_repository(self, session: AsyncSession) -> ProjectAccessRepository:
+        return project_access_repository_for_session(session)

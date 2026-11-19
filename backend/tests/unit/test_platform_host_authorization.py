@@ -4,9 +4,13 @@ import asyncio
 from uuid import uuid4
 
 import pytest
+from dishka import Scope
 from starlette.requests import Request
 
 from api.platform.module import PlatformRequestModule
+from devops_platform.application.resource_management.get_resource.handler import (
+    ReadResourceHandler,
+)
 from devops_platform.application.resource_management.get_resource.query import (
     ReadResource,
 )
@@ -34,14 +38,28 @@ def test_http_host_rechecks_trusted_access_and_rolls_back_denial(monkeypatch) ->
             return present(result)
 
     class Container:
-        async def get(self, kind):
-            assert kind is SqlAlchemyUnitOfWork
-            return Unit()
+        def __call__(self, *, scope):
+            assert scope is Scope.ACTION
+            return self
 
-    class Inner:
-        async def query(self, message):
-            events.append("dispatch")
-            return message
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, kind, *, component=""):
+            if kind is SqlAlchemyUnitOfWork:
+                assert component == "platform_action"
+                return Unit()
+            assert kind is ReadResourceHandler
+
+            class Handler:
+                async def execute(self, message):
+                    events.append("dispatch")
+                    return message.access
+
+            return Handler()
 
     async def authenticate(*_args):
         events.append("authenticate")
@@ -51,7 +69,6 @@ def test_http_host_rechecks_trusted_access_and_rolls_back_denial(monkeypatch) ->
     request = Request({"type": "http", "method": "GET", "path": "/"})
     request.state.request_identity = "private-token"
     host = PlatformRequestModule(Container(), request, object(), lambda: None)
-    host._inner = Inner()
 
     with pytest.raises(CatalogForbidden):
         asyncio.run(host.query(ReadResource(forged, uuid4())))
@@ -73,14 +90,28 @@ def test_http_host_dispatches_with_authenticated_actor_not_message_claims(monkey
             return present(result)
 
     class Container:
-        async def get(self, kind):
-            assert kind is SqlAlchemyUnitOfWork
-            return Unit()
+        def __call__(self, *, scope):
+            assert scope is Scope.ACTION
+            return self
 
-    class Inner:
-        async def query(self, message):
-            events.append("dispatch")
-            return message.access
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, kind, *, component=""):
+            if kind is SqlAlchemyUnitOfWork:
+                assert component == "platform_action"
+                return Unit()
+            assert kind is ReadResourceHandler
+
+            class Handler:
+                async def execute(self, message):
+                    events.append("dispatch")
+                    return message.access
+
+            return Handler()
 
     async def authenticate(*_args):
         events.append("authenticate")
@@ -90,7 +121,6 @@ def test_http_host_dispatches_with_authenticated_actor_not_message_claims(monkey
     request = Request({"type": "http", "method": "GET", "path": "/"})
     request.state.request_identity = "private-token"
     host = PlatformRequestModule(Container(), request, object(), lambda: None)
-    host._inner = Inner()
 
     assert asyncio.run(host.query(ReadResource(forged, uuid4()))) == trusted
     assert events == ["authenticate", "dispatch", "commit"]

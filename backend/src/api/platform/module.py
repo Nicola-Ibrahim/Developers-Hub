@@ -1,10 +1,9 @@
 """HTTP host: authenticate and complete each platform dispatch transaction."""
 
-from collections.abc import Awaitable, Callable
 from dataclasses import is_dataclass, replace
 from typing import Any, Literal, TypeVar, cast
 
-from dishka import AsyncContainer
+from dishka import AsyncContainer, Scope
 from fastapi import Request
 
 from api.composition.browser_access import authenticate_browser_operation
@@ -64,6 +63,7 @@ _DELIVERY_MESSAGES = (
     ProcessGithubPreviewWebhook,
 )
 _MUTATING_BROWSER_MESSAGES = (ManageProjectMembership,)
+_ACTION_COMPONENT = "platform_action"
 
 
 class PlatformRequestModule(DeveloperPlatformModule):
@@ -76,99 +76,129 @@ class PlatformRequestModule(DeveloperPlatformModule):
         self._request = request
         self._settings = settings
         self._clock = clock
-        self._inner = DeveloperPlatformModuleDispatcher(container.get)
 
     async def execute(self, command: Command[ResultT]) -> ResultT:
         if isinstance(command, ProcessGithubPreviewWebhook):
-            return await self._run_unscoped(command, self._inner.execute)
-        return await self._run_authorized(command, self._inner.execute)
+            return await self._run_unscoped(command, "execute")
+        return await self._run_authorized(command, "execute")
 
     async def query(self, query: Query[ResultT]) -> ResultT:
         if isinstance(query, ReadTemplates):
             authorize_platform_action(query)
-            return cast(ResultT, await self._inner.query(query))
-        return await self._run_authorized(query, self._inner.query)
+            async with self._container(scope=Scope.ACTION) as action_container:
+                inner = DeveloperPlatformModuleDispatcher(
+                    lambda handler_type: action_container.get(
+                        handler_type, component=_ACTION_COMPONENT
+                    )
+                )
+                return cast(ResultT, await inner.query(query))
+        return await self._run_authorized(query, "query")
 
     async def _run_unscoped(
-        self, message: MessageT, dispatch: Callable[[MessageT], Awaitable[ResultT]]
+        self, message: MessageT, method: Literal["execute", "query"]
     ) -> ResultT:
         authorize_platform_action(message)
-        unit = await self._container.get(SqlAlchemyUnitOfWork)
-        try:
-            return await unit.run(lambda: dispatch(message), lambda result: result)
-        except DatabaseUnavailable as error:
-            raise self._unavailable(message) from error
+        async with self._container(scope=Scope.ACTION) as action_container:
+            unit = await action_container.get(SqlAlchemyUnitOfWork, component=_ACTION_COMPONENT)
+            inner = DeveloperPlatformModuleDispatcher(
+                lambda handler_type: action_container.get(handler_type, component=_ACTION_COMPONENT)
+            )
+            try:
+                return await unit.run(
+                    lambda: self._dispatch(inner, method, message), lambda result: result
+                )
+            except DatabaseUnavailable as error:
+                raise self._unavailable(message) from error
 
     async def _run_authorized(
-        self, message: MessageT, dispatch: Callable[[MessageT], Awaitable[ResultT]]
+        self, message: MessageT, method: Literal["execute", "query"]
     ) -> ResultT:
         if not is_dataclass(message) or not (
             hasattr(message, "access") or isinstance(message, ReadProjects)
         ):
             raise TypeError("Platform message lacks access context")
         token: RequestIdentity = getattr(self._request.state, "request_identity", None)
-        unit = await self._container.get(SqlAlchemyUnitOfWork)
+        async with self._container(scope=Scope.ACTION) as action_container:
+            unit = await action_container.get(SqlAlchemyUnitOfWork, component=_ACTION_COMPONENT)
+            inner = DeveloperPlatformModuleDispatcher(
+                lambda handler_type: action_container.get(handler_type, component=_ACTION_COMPONENT)
+            )
 
-        async def authorized() -> ResultT:
-            if isinstance(message, ReadProjects) and isinstance(token, BrowserRequestCredentials):
-                principal = await authenticate_browser_operation(
-                    unit.session,
-                    token.session_token,
-                    None,
-                    self._clock,
-                    token_pepper=self._settings.token_pepper.get_secret_value(),
-                )
-                accesses = tuple(
-                    AccessContext(
-                        principal.user_id,
-                        member.project_id,
-                        cast(Literal["developer", "admin"], member.role),
-                        frozenset(ALL_SCOPES),
-                    )
-                    for member in principal.memberships
-                )
-                current = cast(MessageT, replace(message, accesses=accesses))
-            else:
-                if isinstance(token, BrowserRequestCredentials) and isinstance(
-                    message, (ListProjectMembers, *_MUTATING_BROWSER_MESSAGES)
+            async def authorized() -> ResultT:
+                if isinstance(message, ReadProjects) and isinstance(
+                    token, BrowserRequestCredentials
                 ):
-                    project_id = message.project_id
                     principal = await authenticate_browser_operation(
                         unit.session,
                         token.session_token,
-                        project_id,
+                        None,
                         self._clock,
-                        token.csrf_token,
-                        token.origin,
-                        self._settings.browser_allowed_origins,
-                        isinstance(message, _MUTATING_BROWSER_MESSAGES),
-                        self._settings.token_pepper.get_secret_value(),
+                        token_pepper=self._settings.token_pepper.get_secret_value(),
                     )
-                    if principal.project_id is None or principal.role not in {"developer", "admin"}:
-                        raise PlatformRequestError(
-                            "project_required", "Select an authorized project", 409
+                    accesses = tuple(
+                        AccessContext(
+                            principal.user_id,
+                            member.project_id,
+                            cast(Literal["developer", "admin"], member.role),
+                            frozenset(ALL_SCOPES),
                         )
-                    access = AccessContext(
-                        principal.user_id,
-                        principal.project_id,
-                        cast(Literal["developer", "admin"], principal.role),
-                        frozenset(principal.scopes),
+                        for member in principal.memberships
                     )
+                    current = cast(MessageT, replace(message, accesses=accesses))
                 else:
-                    access = await authenticate_platform_access(
-                        unit.session, token, self._settings, self._clock
-                    )
-                if isinstance(message, ReadProjects):
-                    current = cast(MessageT, replace(message, accesses=(access,)))
-                else:
-                    current = cast(MessageT, replace(message, access=access))
-            authorize_platform_action(current)
-            return await dispatch(current)
+                    if isinstance(token, BrowserRequestCredentials) and isinstance(
+                        message, (ListProjectMembers, *_MUTATING_BROWSER_MESSAGES)
+                    ):
+                        project_id = message.project_id
+                        principal = await authenticate_browser_operation(
+                            unit.session,
+                            token.session_token,
+                            project_id,
+                            self._clock,
+                            token.csrf_token,
+                            token.origin,
+                            self._settings.browser_allowed_origins,
+                            isinstance(message, _MUTATING_BROWSER_MESSAGES),
+                            self._settings.token_pepper.get_secret_value(),
+                        )
+                        if principal.project_id is None or principal.role not in {
+                            "developer",
+                            "admin",
+                        }:
+                            raise PlatformRequestError(
+                                "project_required", "Select an authorized project", 409
+                            )
+                        access = AccessContext(
+                            principal.user_id,
+                            principal.project_id,
+                            cast(Literal["developer", "admin"], principal.role),
+                            frozenset(principal.scopes),
+                        )
+                    else:
+                        access = await authenticate_platform_access(
+                            unit.session, token, self._settings, self._clock
+                        )
+                    if isinstance(message, ReadProjects):
+                        current = cast(MessageT, replace(message, accesses=(access,)))
+                    else:
+                        current = cast(MessageT, replace(message, access=access))
+                authorize_platform_action(current)
+                return await self._dispatch(inner, method, current)
 
-        try:
-            return await unit.run(authorized, lambda result: result)
-        except DatabaseUnavailable as error:
-            raise self._unavailable(message) from error
+            try:
+                return await unit.run(authorized, lambda result: result)
+            except DatabaseUnavailable as error:
+                raise self._unavailable(message) from error
+
+    @staticmethod
+    async def _dispatch(
+        inner: DeveloperPlatformModuleDispatcher,
+        method: Literal["execute", "query"],
+        message: MessageT,
+    ) -> ResultT:
+        if method == "execute":
+            return await inner.execute(cast(Command[ResultT], message))
+        return await inner.query(cast(Query[ResultT], message))
 
     @staticmethod
     def _unavailable(message: object) -> PlatformRequestError:

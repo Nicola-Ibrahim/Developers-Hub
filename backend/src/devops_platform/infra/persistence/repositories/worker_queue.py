@@ -411,6 +411,9 @@ class PostgresResourceEffectGuard:
     async def __call__(self, resource_id: UUID) -> AsyncGenerator[bool, None]:
         key = resource_id.int % (2**63 - 1)
         async with self.engine.connect() as connection:
+            # Keep the session-level advisory lock on a one-off connection instead
+            # of returning it to the worker's application pool after the effect.
+            await connection.run_sync(lambda sync_connection: sync_connection.detach())
             acquired = await connection.scalar(
                 text("SELECT pg_try_advisory_lock(:key)"), {"key": key}
             )
