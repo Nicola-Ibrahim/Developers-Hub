@@ -1,152 +1,124 @@
-# DevOps Hub architecture
+# Developers-Hub · Architecture deep dive
 
-This document describes the current code structure and its intended boundaries.
-It is an architecture map, not proof that every listed capability has completed
-local, PostgreSQL, Docker, or cloud acceptance.
+[← Project overview](../README.md)
 
-## C4 Level 1: System context
+Developers-Hub is a **DDD-inspired modular monolith** with a FastAPI control-plane API, separately running workers, and a shared PostgreSQL database. Its central concern is the boundary between **transactional control-plane state** and **long-running external effects**.
 
-```mermaid
-flowchart LR
-    developer["Developer"]
-    operator["Platform operator"]
-    hub["DevOps Hub<br/>Internal developer platform"]
-    postgres[("Control-plane PostgreSQL")]
-    docker["Local Docker runtime"]
-    github["GitHub<br/>optional integration"]
-    future["Server or cloud target<br/>planned"]
+The [README](../README.md#architecture) contains the **C4 Level 1 system context** and **Level 2 container** diagrams. This document zooms into the API application (Level 3), then shows its database/worker lifecycle.
 
-    developer -->|Dashboard or API| hub
-    operator -->|Configures and operates| hub
-    hub -->|Stores platform state| postgres
-    hub -->|Provisions and removes resources| docker
-    hub -.->|Repository and preview workflows| github
-    hub -.->|Future provider adapters| future
-```
+## C4 Level 3: Control-plane API components
 
-## C4 Level 2: Containers and bounded contexts
+*Components inside the FastAPI application container (not individually deployed services).*
 
 ```mermaid
-flowchart LR
-    developer["Developer"]
-    operator["Platform operator"]
-    docker["Local Docker runtime"]
-    github["GitHub<br/>optional"]
-    opa["OPA policy engine<br/>Identity permissions"]
+flowchart TB
+    Browser["Next.js dashboard<br/>HTTP client"]
+    OPA["OPA policy service<br/>External to API process"]
+    DB[("PostgreSQL<br/>External to API process")]
 
-    subgraph hub["DevOps Hub"]
-        dashboard["Developer dashboard<br/>Next.js"]
-        api["Platform API<br/>FastAPI"]
-        subgraph identity["Identity bounded context"]
-            identityModule["Identity module"]
-        end
-        subgraph platform["Developer Platform bounded context"]
-            platformModule["Developer Platform module"]
-            resourceWorker["Resource worker"]
-            deliveryWorker["Application delivery worker"]
-        end
-        controlPlane[("Control-plane PostgreSQL")]
+    subgraph API["FastAPI control-plane API · Python process"]
+        Routes["HTTP routes and schemas<br/>Transport mapping and validation"]
+        Boundary["API composition / platform request boundary<br/>Credentials, authorization and transactions"]
+        Identity["Identity module<br/>Accounts, credentials and sessions"]
+        Platform["DeveloperPlatform module<br/>Projects, access, resources and delivery"]
+        Dispatch["Typed module dispatch<br/>Command/query handler resolution"]
+        Domain["Domain models and policies<br/>Invariants and state transitions"]
+        Persistence["SQLAlchemy adapters<br/>Repositories and projections"]
+        DI["Dishka composition<br/>Providers and execution scopes"]
     end
 
-    developer --> dashboard
-    developer --> api
-    operator --> api
-    dashboard -->|HTTPS / JSON| api
-    api -->|Identity commands and queries| identityModule
-    api -->|Evaluate Identity permissions| opa
-    api -->|Platform commands and queries| platformModule
-    identityModule --> controlPlane
-    platformModule --> controlPlane
-    resourceWorker -->|Claim and complete operations| controlPlane
-    deliveryWorker -->|Claim and complete delivery steps| controlPlane
-    resourceWorker -->|Manage databases| docker
-    deliveryWorker -->|Manage applications| docker
-    deliveryWorker -.->|Repository integration| github
+    Browser -->|Requests| Routes
+    Routes -->|Delegates| Boundary
+    Boundary -->|Identity operations| Identity
+    Boundary -->|Platform operations| Dispatch
+    Dispatch -->|Invokes| Platform
+    Platform -->|Enforces invariants| Domain
+    Identity -->|Persists| Persistence
+    Platform -->|Persists| Persistence
+    Persistence -->|SQL| DB
+    Boundary -->|Evaluates identity permissions| OPA
+    DI -.->|Resolves dependencies| Identity
+    DI -.->|Resolves dependencies| Platform
+    DI -.->|Provides transaction sessions| Persistence
 ```
 
-### Identity: access and administration
-
-The Identity module dispatches these commands and queries. The boxes describe
-application behavior; they are not separate deployed containers.
-
-```mermaid
-flowchart TB
-    api["FastAPI identity routes"] --> module["IdentityModule<br/>execute / query"]
-    module --> access["Sign in and manage access<br/>Log in/out; refresh session; rotate CSRF<br/>Change password; list/revoke sessions<br/>Issue/revoke/authenticate API tokens"]
-    module --> people["Manage internal users<br/>Create, activate/deactivate users<br/>Bootstrap first admin; set up passwords"]
-    module --> membership["Manage project membership<br/>List members; grant or change membership<br/>Select active project"]
-    access --> identityDb[("Identity-owned tables")]
-    people --> identityDb
-    membership --> identityDb
-```
-
-### Developer Platform: projects, databases, and applications
-
-The Developer Platform module dispatches the developer-facing actions. Workers
-execute durable resource and delivery steps after the API transaction commits.
-
-```mermaid
-flowchart TB
-    api["FastAPI platform routes"] --> module["DeveloperPlatformModule<br/>execute / query"]
-    module --> projects["Set up a project<br/>Register project; view projects<br/>Browse approved resource options"]
-    module --> databases["Request and manage a database<br/>Request PostgreSQL; view status and operation<br/>Get connection; extend lease; delete<br/>View activity and resources"]
-    module --> applications["Create and deliver an application<br/>View templates; create application<br/>Attach database; deploy; retry failed step<br/>View applications and deployment history<br/>Process preview webhook"]
-    projects --> platformDb[("Platform-owned tables")]
-    databases --> platformDb
-    applications --> platformDb
-    platformDb --> resourceWorker["Database worker<br/>Provision, reconcile, and remove"]
-    platformDb --> deliveryWorker["Application worker<br/>Execute delivery steps"]
-    resourceWorker --> docker["Local Docker provider"]
-    deliveryWorker --> docker
-    deliveryWorker -.-> github["GitHub integration<br/>when configured"]
-```
+The diagram shows logical components and dependencies; it is **not a claim that every use case currently follows an identical dispatcher pipeline**. Platform HTTP operations use Dishka `ACTION` scopes; some Identity workflows retain specialized transaction handling.
 
 ## Bounded-context responsibilities
 
-| Context | Owns | Public services offered to the API or workers |
+| Context | Owns | In the code |
 | --- | --- | --- |
-| Identity | Internal users, password credentials, browser sessions, API tokens, project membership | Sign in and manage access; manage internal users; manage project membership |
-| Developer Platform | Project registration, approved catalog, temporary resources and leases, operations, application delivery | Set up a project; request and manage a database; create and deliver an application |
+| **Identity** | Users, credentials, API tokens, browser sessions, authentication and session security | [`backend/src/identity/`](../backend/src/identity/) |
+| **DeveloperPlatform** | Projects, project membership and authorization, resource admission/leases, operations, application delivery | [`backend/src/devops_platform/`](../backend/src/devops_platform/) |
+| **Composition** | HTTP adaptation, cross-context integration, Dishka registration, transaction boundary assembly | [`backend/src/api/`](../backend/src/api/) and [`backend/src/composition/`](../backend/src/composition/) |
 
-The API calls only the `IdentityModule` and `DeveloperPlatformModule` contracts. It does not choose handlers or issue SQL directly. The resource and delivery workers use durable operations and delivery steps so provider effects can be retried after a restart.
+The two contexts share a PostgreSQL control-plane database. Their separation is primarily **code, ownership, and domain behavior**, not separate databases or deployments.
 
-## Trigger map
+## Transaction model
+
+### Ordinary API operations
+
+```mermaid
+sequenceDiagram
+    participant Route as FastAPI route
+    participant Host as Platform request boundary
+    participant Action as Dishka ACTION scope
+    participant Handler as Application handler
+    participant DB as PostgreSQL
+
+    Route->>Host: Command / query
+    Host->>Action: Create operation scope
+    Action->>DB: Begin transaction
+    Host->>DB: Revalidate authorization as required
+    Action->>Handler: Resolve and execute
+    Handler->>DB: Repository reads / writes
+    Action->>DB: Commit or rollback
+    Action-->>Route: Materialized result
+```
+
+The module boundary owns the **normal atomic platform operation**, while SQLAlchemy supplies the actual database transaction. A request may contain multiple separate operations; an HTTP connection is **not** automatically one long transaction.
+
+### Multi-phase work
+
+Login, credential-file delivery, and infrastructure workers can require specialized boundaries. A successful first phase cannot be undone by rolling back a later phase, so these workflows rely on explicit state, idempotency, and compensating or recovery operations where applicable.
+
+## Durable provisioning and application delivery
 
 ```mermaid
 flowchart LR
-    Developer[Developer or dashboard]
-    API[FastAPI API]
-    Identity[Identity module]
-    Platform[Developer Platform module]
-    DB[(Control-plane PostgreSQL)]
-    ResourceWorker[Resource worker]
-    DeliveryWorker[Application delivery worker]
-    Docker[Local Docker provider]
-    GitHub[GitHub adapter]
-
-    Developer -->|login, browse, request, renew, delete| API
-    API -->|identity commands and queries| Identity
-    API -->|platform commands and queries| Platform
-    Identity --> DB
-    Platform -->|durable intent, operation, audit| DB
-    ResourceWorker -->|claim and update resource operations| DB
-    DeliveryWorker -->|claim and update delivery steps| DB
-    ResourceWorker -->|provision, inspect, delete| Docker
-    DeliveryWorker -->|deploy, remove| Docker
-    DeliveryWorker -.->|optional repository and webhook flow| GitHub
+    Submit["API command<br/>Validate and accept"] --> Intent[("Durable operation<br/>PostgreSQL")]
+    Intent --> Claim["Worker claim<br/>Short transaction"]
+    Claim --> Effect["External Docker / GitHub effect<br/>No database transaction"]
+    Effect --> Result["Persist outcome<br/>Short transaction"]
+    Result --> Intent
+    Result --> Status["Authorized status query<br/>Dashboard"]
 ```
 
-## Domain-first rules
+- **Resource worker:** creates, reconciles, renews, and removes approved local PostgreSQL resources.
+- **Delivery worker:** processes application delivery steps and supports retries and optional GitHub-backed workflows.
+- **Recovery:** durable job status, leases, claim tokens, retries, and provider-outcome reconciliation protect against interrupted operations.
 
-- Identity and Developer Platform are independent bounded contexts. Cross-context actor mapping belongs in the host or composition layer.
-- Domain code owns business state and invariants. Application handlers orchestrate one use case through domain objects and interfaces.
-- A repository corresponds to an aggregate or named transactional capability. The current resource aggregate uses `SQLAlchemyResourceRepository`; application delivery uses `SQLAlchemyApplicationDeliveryRepository`.
-- SQLAlchemy, Docker, GitHub, encryption, and future AWS SDK calls belong in infrastructure. A future AWS adapter must implement an application port; the domain must not import cloud SDKs.
-- HTTP authentication and project permission checks happen at the API/HTTP host boundary. The host owns transaction completion. Workers perform provider effects only after durable intent has committed.
+**Current behavior:** operation progress is exposed through ordinary API reads. An SSE-based push channel is part of the intended evolution, **not an implemented capability in the reviewed revision**. Worker retry/recovery scheduling remains distinct from frontend progress delivery.
 
-## Current limits
+## Runtime and operational boundaries
 
-- The local Docker target is the implemented demonstration target. Configured server, Kubernetes, and cloud targets remain future adapter work.
-- GitHub integration is optional and configuration dependent.
-- A database request being recorded does not mean a database is ready. The resource worker must confirm readiness and record the result.
-- The dashboard is a client of the API; it does not contain platform lifecycle rules.
+- **API and dashboard:** core Compose services for local development.
+- **Workers:** independent processes, not automatically started by the core Compose stack.
+- **PostgreSQL:** source of truth for control-plane resources, identities, and operation state; schema managed explicitly by Alembic.
+- **OPA:** policy decisions for identity authorization; project-specific authorization also lives in the platform application.
+- **Docker:** implemented local runtime provider; cloud provider support remains future work.
+- **Terraform and Ansible:** supporting hosting/bootstrap infrastructure in [`ops/`](../ops/), not proof of an automated production deployment.
+
+## Key source entry points
+
+| Concern | Source |
+| --- | --- |
+| API assembly and routes | [`backend/src/api/`](../backend/src/api/) |
+| Typed dispatch registry | [`backend/src/shared/dispatch.py`](../backend/src/shared/dispatch.py) |
+| Platform HTTP transaction boundary | [`backend/src/api/platform/module.py`](../backend/src/api/platform/module.py) |
+| Identity module dispatch | [`backend/src/identity/infra/composition/module.py`](../backend/src/identity/infra/composition/module.py) |
+| Platform per-operation DI | [`backend/src/devops_platform/infra/composition/providers_action.py`](../backend/src/devops_platform/infra/composition/providers_action.py) |
+| Resource worker | [`backend/src/devops_platform/infra/workers/resource_worker.py`](../backend/src/devops_platform/infra/workers/resource_worker.py) |
+| Application delivery worker | [`backend/src/devops_platform/infra/workers/application_host.py`](../backend/src/devops_platform/infra/workers/application_host.py) |
+
+*Diagrams document the architecture visible in the current repository; they do not constitute integration or production-readiness certification.*

@@ -1,113 +1,147 @@
 # Developers-Hub
 
-**A self-service internal developer platform for creating, provisioning, and delivering applications.**
+**A self-service internal developer platform for creating applications, provisioning temporary infrastructure, and managing local delivery.**
 
-Developers-Hub brings common development tasks into one place: start from an approved application template, request a temporary database, and manage local deployments—without rebuilding the same setup for every project.
+`Python 3.12` · `FastAPI` · `Next.js` · `PostgreSQL` · `SQLAlchemy` · `Dishka` · `Docker` · `OPA`
 
-> **Why I built it:** I wanted to explore how platform engineering can turn repetitive infrastructure and delivery work into safe, repeatable developer workflows. The challenge is not simply starting a container; it is managing access, state, failures, and recovery across the whole operation.
+[Architecture](#architecture) · [Engineering decisions](#engineering-decisions) · [Run locally](#run-locally) · [Technical deep dive](docs/architecture.md)
 
-## What it does
+## Why I built it
 
-| Capability | What the platform provides |
+A developer should not need to repeat repository setup, database configuration, access management, and deployment steps for every new project.
+
+**Developers-Hub explores how those tasks can become one reusable developer experience**—while keeping infrastructure operations secure, recoverable, and independent of HTTP request lifetimes.
+
+## What you can do
+
+| Workflow | Capability |
 | --- | --- |
-| **Developer workspace** | Next.js dashboard for projects, applications, resources, activity, and account sessions. |
-| **Identity & access** | Internal accounts, browser sessions, API tokens, project roles, and OPA-backed identity permissions. |
-| **Application delivery** | Versioned **FastAPI, Node.js, and ASP.NET Core** starter templates, application registration, local Docker delivery, and optional GitHub/PR-preview integration. |
-| **Temporary databases** | Approved PostgreSQL configurations with quotas, time-limited leases, renewal, deletion, and connection details. |
-| **Durable operations** | Asynchronous workers with idempotent requests, claims, heartbeats, retries, and recovery after interrupted work. |
+| **Create** | Start applications from versioned FastAPI, Node.js, and ASP.NET Core templates; integrate with GitHub when configured. |
+| **Provision** | Request approved temporary PostgreSQL databases with quotas, leases, and controlled cleanup. |
+| **Deliver** | Manage local Docker application delivery, deployment steps, retries, and optional pull-request previews. |
+| **Control access** | Use project roles, browser sessions, API tokens, CSRF protection, and OPA-backed identity authorization. |
+| **Track operations** | Review durable resource and delivery status, activity, failures, and retry outcomes in a Next.js workspace. |
 
 ## Architecture
 
+### C4 Level 1: System context
+
+*Who uses the platform, and which external systems does it interact with?*
+
 ```mermaid
 flowchart LR
-    Developer["Developer"] --> UI["Next.js dashboard"]
-    UI --> API["FastAPI control plane"]
+    Dev["Developer<br/>Requests apps and infrastructure"]
+    Operator["Platform operator<br/>Configures approved resources"]
+    Hub["Developers-Hub<br/>Internal developer platform"]
+    GitHub["GitHub<br/>Repositories and webhooks"]
+    Docker["Docker Engine<br/>Local infrastructure runtime"]
 
-    subgraph Backend["Modular monolith"]
-        Identity["Identity<br/>Accounts · sessions · tokens"]
-        Platform["Developer Platform<br/>Projects · resources · delivery"]
-    end
-
-    API --> Identity
-    API --> Platform
-    API --> Policy["OPA policy engine"]
-    Identity --> DB[("PostgreSQL<br/>Control-plane state")]
-    Platform --> DB
-
-    DB --> ResourceWorker["Resource worker"]
-    DB --> DeliveryWorker["Delivery worker"]
-    ResourceWorker --> Docker["Local Docker runtime"]
-    DeliveryWorker --> Docker
-    DeliveryWorker -.-> GitHub["GitHub integration<br/>Optional"]
+    Dev -->|Uses workspace and API| Hub
+    Operator -->|Configures and operates| Hub
+    Hub -.->|Optional repository integration| GitHub
+    Hub -->|Provisions and manages local workloads| Docker
 ```
 
-**Two bounded contexts** separate authentication and account ownership (**Identity**) from project access, infrastructure resources, and software delivery (**Developer Platform**). Both run in one FastAPI backend, use SQLAlchemy/PostgreSQL for durable state, and communicate through application interfaces and composition-layer integration.
+### C4 Level 2: Containers
 
-### How a provisioning request works
+*The separately running applications and data stores that make up Developers-Hub.*
+
+```mermaid
+flowchart TB
+    Dev["Developer<br/>Browser"]
+    Docker["Docker Engine<br/>External local runtime"]
+    GitHub["GitHub<br/>Optional external service"]
+
+    subgraph Hub["Developers-Hub · system boundary"]
+        UI["Developer dashboard<br/>Next.js"]
+        API["Control-plane API<br/>FastAPI · Python"]
+        OPA["Policy service<br/>Open Policy Agent"]
+        DB[("Control-plane database<br/>PostgreSQL")]
+        ResourceWorker["Resource worker<br/>Provision and clean up databases"]
+        DeliveryWorker["Delivery worker<br/>Execute application delivery steps"]
+    end
+
+    Dev -->|Uses| UI
+    UI -->|HTTP / JSON| API
+    API -->|Evaluates identity policies| OPA
+    API -->|Stores users, projects, jobs, audit| DB
+    ResourceWorker -->|Claims and updates operations| DB
+    DeliveryWorker -->|Claims and updates delivery steps| DB
+    ResourceWorker -->|Manages databases| Docker
+    DeliveryWorker -->|Manages applications| Docker
+    DeliveryWorker -.->|Repository workflows| GitHub
+```
+
+**Inside the API:** `Identity` owns users, credentials, and sessions; `DeveloperPlatform` owns project access, resources, and delivery. They are **bounded contexts within one modular monolith**, not separate microservices. [Explore the Level 3 component diagram](docs/architecture.md#c4-level-3-control-plane-api-components).
+
+### A provisioning request, end to end
 
 ```mermaid
 sequenceDiagram
-    participant Dev as Developer
-    participant API as FastAPI
+    actor Developer
+    participant API as FastAPI API
     participant DB as PostgreSQL
     participant Worker as Resource worker
-    participant Docker as Docker provider
+    participant Docker as Docker Engine
 
-    Dev->>API: Request temporary PostgreSQL
-    API->>DB: Validate and atomically save operation
+    Developer->>API: Request temporary database
+    API->>DB: Validate and persist resource + operation
     DB-->>API: Commit
-    API-->>Dev: 202 Accepted + operation ID
-    Worker->>DB: Claim operation (short transaction)
-    Worker->>Docker: Provision outside DB transaction
-    Docker-->>Worker: Result
-    Worker->>DB: Commit success, failure, or retry state
-    Dev->>API: Read current operation status
-    API->>DB: Authorized status query
-    API-->>Dev: Current state
+    API-->>Developer: 202 Accepted + operation ID
+    Worker->>DB: Claim job (short transaction)
+    Worker->>Docker: Provision outside the transaction
+    Docker-->>Worker: Outcome
+    Worker->>DB: Commit status / retry details
+    Developer->>API: GET operation status
+    API-->>Developer: Committed state
 ```
 
-The **API records intent; workers perform effects**. This keeps HTTP requests short and allows work to recover from retries, worker restarts, or uncertain provider outcomes. Progress is currently available through the operation-status API; SSE streaming is a planned enhancement.
+**The principle:** accept work durably, perform external effects outside database transactions, and recover through explicit job state rather than holding an HTTP request open.
 
 ## Engineering decisions
 
-- **DDD-inspired modular monolith:** domain models and application use cases stay separate from FastAPI, SQLAlchemy, and provider adapters.
-- **Typed command/query dispatch:** module interfaces route use cases; Dishka resolves dependencies, with action-scoped transactions being adopted incrementally.
-- **Durability before side effects:** database acceptance commits before a worker touches Docker or GitHub. Leases, claim tokens, and idempotency protect retries and concurrent execution.
-- **Security by boundary:** project-scoped authorization, HttpOnly browser sessions, CSRF checks, OPA identity policies, and audit records.
+| Design choice | Rationale |
+| --- | --- |
+| **DDD-inspired modular monolith** | Keep domain boundaries clear without paying the operational cost of microservices. |
+| **Typed commands, queries, and Dishka DI** | Keep use cases separate from HTTP and infrastructure wiring. |
+| **PostgreSQL-backed durable jobs** | Survive retries and worker restarts using claim tokens, leases, idempotency, and recorded outcomes. |
+| **Short transaction boundaries** | Commit the intent before provisioning; do not hold locks during Docker or GitHub operations. |
+| **Defense-in-depth access** | Project-scoped permissions, HttpOnly sessions, CSRF checks, policy evaluation, and audit events. |
 
-**Stack:** Python 3.12 · FastAPI · SQLAlchemy 2 · PostgreSQL · Dishka · Alembic · Next.js / React / TypeScript · Docker · OPA · pytest · GitHub Actions · Terraform / Ansible (hosting assets)
+## Run locally
 
-## Repository map
-
-```text
-backend/src/
-  api/               HTTP routes and transport adapters
-  identity/          Accounts, authentication, sessions, tokens
-  devops_platform/   Projects, resources, application delivery, workers
-  composition/       Cross-context wiring and Dishka container
-  shared/            Typed dispatch and database infrastructure
-frontend/            Next.js developer dashboard
-ops/                 Local/hosting automation and monitoring assets
-scripts/             Development and database commands
-docs/architecture.md Detailed diagrams and boundaries
-```
-
-## Explore locally
-
-Requires **Docker Engine/Desktop with Compose v2** and **Python 3**. From the repository root:
+**Requirements:** Docker Engine or Docker Desktop, Docker Compose v2, and Python 3.
 
 ```bash
-./scripts/dev.sh up      # Initialize local configuration, build, migrate, start core services
-./scripts/dev.sh status  # Inspect core services
-./scripts/dev.sh down    # Stop local services
+git clone https://github.com/Nicola-Ibrahim/Developers-Hub.git
+cd Developers-Hub
+./scripts/dev.sh up
 ```
 
-- **Dashboard:** `http://127.0.0.1:3000` — includes a synthetic guest preview (`/demo`).
-- **API docs:** `http://127.0.0.1:8000/docs` · **Readiness:** `/health/ready`.
-- The core Compose stack starts PostgreSQL, OPA, the API, migrations, and the dashboard. **Provisioning/delivery workers are separate processes**, and real resource operations require operator configuration and access bootstrap. See [backend setup](backend/README.md) and [frontend setup](frontend/README.md).
+The script creates local development configuration and starts the **core services**: dashboard, API, PostgreSQL, OPA, and migrations.
 
-## Status & next steps
+- **Dashboard:** <http://127.0.0.1:3000> (includes a synthetic guest preview)
+- **API docs:** <http://127.0.0.1:8000/docs>
+- **Readiness:** <http://127.0.0.1:8000/health/ready>
 
-**Active portfolio / engineering project.** The current provider targets local Docker. Optional GitHub integration is configuration-dependent; production cloud targets and event-driven SSE progress are future work. This repository is not presented as a production-hosted platform.
+> **Development status:** This is an active prototype, not a production deployment. Worker processes and real provisioning require additional operator configuration; the current `main` branch also has outstanding CI failures. The guest preview does not provision real infrastructure. SSE progress streaming and cloud providers are planned work.
 
-For a deeper technical walkthrough, see [Architecture](docs/architecture.md), [Backend](backend/README.md), and [Hosting infrastructure](ops/hosting/terraform/README.md).
+To inspect or stop local services:
+
+```bash
+./scripts/dev.sh status
+./scripts/dev.sh down
+```
+
+## Explore the code
+
+| Interested in… | Start here |
+| --- | --- |
+| Domain boundaries and transaction orchestration | [Architecture deep dive](docs/architecture.md) |
+| Authentication, sessions, and authorization | [`backend/src/identity`](backend/src/identity/) |
+| Project resources, application delivery, and workers | [`backend/src/devops_platform`](backend/src/devops_platform/) |
+| HTTP integration and DI composition | [`backend/src/api`](backend/src/api/) · [`backend/src/composition`](backend/src/composition/) |
+| Developer dashboard | [`frontend/src/features`](frontend/src/features/) |
+| Infrastructure configuration | [`ops`](ops/) · [Terraform notes](ops/hosting/terraform/README.md) |
+
+**More detail:** [Backend setup](backend/README.md) · [Frontend setup](frontend/README.md) · [C4 component and lifecycle diagrams](docs/architecture.md)
