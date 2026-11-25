@@ -15,7 +15,7 @@ from identity.domain.interfaces.user_repository import UserRepository
 from identity.domain.records import MembershipDetails, SessionPrincipal
 from identity.domain.value_objects.session_expiry import SessionExpiry
 from identity.infra.persistence.models.activity import IdentityActivityRow
-from identity.infra.persistence.models.session import BrowserSessionRow
+from identity.infra.persistence.models.session import SessionRow
 
 _IDLE_WINDOW = timedelta(minutes=30)
 
@@ -32,10 +32,10 @@ class SQLAlchemySessionRepository(SessionRepository):
         self._session = session
         self._users = users
         self._project_access = project_access
-        self._locked_rows: dict[UUID, BrowserSessionRow] = {}
+        self._locked_rows: dict[UUID, SessionRow] = {}
 
     @staticmethod
-    def _domain_session(row: BrowserSessionRow) -> Session:
+    def _domain_session(row: SessionRow) -> Session:
         return Session(
             row.id,
             row.user_id,
@@ -61,7 +61,7 @@ class SQLAlchemySessionRepository(SessionRepository):
         now: datetime,
     ) -> tuple[SessionPrincipal, UUID, datetime]:
         expires_at = now + timedelta(hours=8)
-        row = BrowserSessionRow(
+        row = SessionRow(
             user_id=user_id,
             token_digest=token_digest,
             csrf_digest=csrf_digest,
@@ -93,7 +93,7 @@ class SQLAlchemySessionRepository(SessionRepository):
         now: datetime,
     ) -> tuple[SessionPrincipal, str] | None:
         row = await self._session.scalar(
-            select(BrowserSessionRow).where(BrowserSessionRow.token_digest == token_digest)
+            select(SessionRow).where(SessionRow.token_digest == token_digest)
         )
         if row is None:
             return None
@@ -127,7 +127,7 @@ class SQLAlchemySessionRepository(SessionRepository):
         )
         return principal, row.csrf_digest
 
-    async def authorize_browser_operation(
+    async def authorize_session_operation(
         self,
         token_digest: str,
         project_id: UUID | None,
@@ -135,7 +135,7 @@ class SQLAlchemySessionRepository(SessionRepository):
         lock_for_mutation: bool = False,
     ) -> SessionPrincipal | None:
         snapshot = await self._session.scalar(
-            select(BrowserSessionRow).where(BrowserSessionRow.token_digest == token_digest)
+            select(SessionRow).where(SessionRow.token_digest == token_digest)
         )
         if snapshot is None:
             return None
@@ -151,10 +151,10 @@ class SQLAlchemySessionRepository(SessionRepository):
             shared_lock=not lock_for_mutation,
         )
         row = await self._session.scalar(
-            select(BrowserSessionRow)
+            select(SessionRow)
             .where(
-                BrowserSessionRow.id == snapshot.id,
-                BrowserSessionRow.token_digest == token_digest,
+                SessionRow.id == snapshot.id,
+                SessionRow.token_digest == token_digest,
             )
             .execution_options(populate_existing=True)
             .with_for_update()
@@ -201,7 +201,7 @@ class SQLAlchemySessionRepository(SessionRepository):
         now: datetime,
     ) -> SessionPrincipal | None:
         snapshot = await self._session.scalar(
-            select(BrowserSessionRow).where(BrowserSessionRow.token_digest == token_digest)
+            select(SessionRow).where(SessionRow.token_digest == token_digest)
         )
         if snapshot is None:
             return None
@@ -214,10 +214,10 @@ class SQLAlchemySessionRepository(SessionRepository):
             return None
         user = await self._users.load_session_account(snapshot.user_id, lock_for_update=True)
         row = await self._session.scalar(
-            select(BrowserSessionRow)
+            select(SessionRow)
             .where(
-                BrowserSessionRow.id == snapshot.id,
-                BrowserSessionRow.token_digest == token_digest,
+                SessionRow.id == snapshot.id,
+                SessionRow.token_digest == token_digest,
             )
             .execution_options(populate_existing=True)
             .with_for_update()
@@ -251,9 +251,7 @@ class SQLAlchemySessionRepository(SessionRepository):
 
     async def rotate_csrf(self, token_digest: str, csrf_digest: str, now: datetime) -> bool:
         row = await self._session.scalar(
-            select(BrowserSessionRow)
-            .where(BrowserSessionRow.token_digest == token_digest)
-            .with_for_update()
+            select(SessionRow).where(SessionRow.token_digest == token_digest).with_for_update()
         )
         if row is None or row.revoked_at is not None or row.absolute_expires_at <= now:
             return False
@@ -262,18 +260,16 @@ class SQLAlchemySessionRepository(SessionRepository):
 
     async def validate_csrf(self, token_digest: str, csrf_digest: str) -> bool:
         stored = await self._session.scalar(
-            select(BrowserSessionRow.csrf_digest).where(
-                BrowserSessionRow.token_digest == token_digest,
-                BrowserSessionRow.revoked_at.is_(None),
+            select(SessionRow.csrf_digest).where(
+                SessionRow.token_digest == token_digest,
+                SessionRow.revoked_at.is_(None),
             )
         )
         return stored is not None and hmac.compare_digest(stored, csrf_digest)
 
     async def logout(self, token_digest: str, now: datetime) -> None:
         row = await self._session.scalar(
-            select(BrowserSessionRow)
-            .where(BrowserSessionRow.token_digest == token_digest)
-            .with_for_update()
+            select(SessionRow).where(SessionRow.token_digest == token_digest).with_for_update()
         )
         if row is not None and row.revoked_at is None:
             row.revoked_at = now
@@ -288,8 +284,8 @@ class SQLAlchemySessionRepository(SessionRepository):
 
     async def logout_all(self, user_id: UUID, now: datetime) -> int:
         result = await self._session.execute(
-            update(BrowserSessionRow)
-            .where(BrowserSessionRow.user_id == user_id, BrowserSessionRow.revoked_at.is_(None))
+            update(SessionRow)
+            .where(SessionRow.user_id == user_id, SessionRow.revoked_at.is_(None))
             .values(revoked_at=now)
         )
         count = int(getattr(result, "rowcount", 0) or 0)
@@ -300,8 +296,8 @@ class SQLAlchemySessionRepository(SessionRepository):
 
     async def revoke_user_sessions(self, user_id: UUID, now: datetime) -> None:
         await self._session.execute(
-            update(BrowserSessionRow)
-            .where(BrowserSessionRow.user_id == user_id, BrowserSessionRow.revoked_at.is_(None))
+            update(SessionRow)
+            .where(SessionRow.user_id == user_id, SessionRow.revoked_at.is_(None))
             .values(revoked_at=now)
         )
 
@@ -310,22 +306,22 @@ class SQLAlchemySessionRepository(SessionRepository):
     ) -> tuple[Session, ...]:
         rows = (
             await self._session.scalars(
-                select(BrowserSessionRow)
+                select(SessionRow)
                 .where(
-                    BrowserSessionRow.user_id == user_id,
-                    BrowserSessionRow.revoked_at.is_(None),
-                    BrowserSessionRow.idle_expires_at > now,
-                    BrowserSessionRow.absolute_expires_at > now,
+                    SessionRow.user_id == user_id,
+                    SessionRow.revoked_at.is_(None),
+                    SessionRow.idle_expires_at > now,
+                    SessionRow.absolute_expires_at > now,
                 )
-                .order_by(BrowserSessionRow.created_at.desc())
+                .order_by(SessionRow.created_at.desc())
             )
         ).all()
         return tuple(self._domain_session(row) for row in rows)
 
     async def load_for_revocation(self, user_id: UUID, session_id: UUID) -> Session | None:
         row = await self._session.scalar(
-            select(BrowserSessionRow)
-            .where(BrowserSessionRow.user_id == user_id, BrowserSessionRow.id == session_id)
+            select(SessionRow)
+            .where(SessionRow.user_id == user_id, SessionRow.id == session_id)
             .with_for_update()
         )
         if row is None:

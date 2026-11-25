@@ -9,7 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from shared.infra.persistence.base import Base, utc_now
 
 
-class BrowserSessionRow(Base):
+class SessionRow(Base):
     __tablename__ = "browser_sessions"
     __table_args__ = (
         CheckConstraint("credential_version >= 1", name="version"),
@@ -31,7 +31,7 @@ class BrowserSessionRow(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class BrowserLoginThrottleRow(Base):
+class LoginThrottleRow(Base):
     __tablename__ = "browser_login_throttles"
     __table_args__ = (CheckConstraint("failures >= 0", name="failures"),)
 

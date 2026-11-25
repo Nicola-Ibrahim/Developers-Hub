@@ -17,12 +17,12 @@ from devops_platform.application.interfaces.software_delivery import ResourcePro
 from devops_platform.application.projects.handler import RegisterProjectHandler
 from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
 from devops_platform.domain.interfaces.project_access_directory import ProjectAccessDirectory
-from identity.application.interfaces.browser_transactions import BrowserTransaction
+from identity.application.interfaces.identity_transactions import IdentityTransaction
 from identity.application.interfaces.token_operations import ApiTokenTransaction
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.interfaces.project_access import IdentityProjectAccess
 from identity.infra.composition.api_token_transactions import SqlAlchemyApiTokenTransaction
-from identity.infra.composition.browser_transactions import SqlAlchemyIdentityTransaction
+from identity.infra.composition.identity_transactions import SqlAlchemyIdentityTransaction
 from shared.application.interfaces.unit_of_work import UnitOfWork
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
@@ -43,7 +43,7 @@ class CrossContextIntegrationProvider(Provider):
     def first_admin_unit_of_work(self, unit: SqlAlchemyUnitOfWork) -> UnitOfWork:
         return FirstAdminUnitOfWork(unit)
 
-    @provide(scope=Scope.REQUEST, provides=BrowserTransaction)
+    @provide(scope=Scope.REQUEST, provides=IdentityTransaction)
     def browser_transaction(
         self, sessions: async_sessionmaker[AsyncSession]
     ) -> SqlAlchemyIdentityTransaction:

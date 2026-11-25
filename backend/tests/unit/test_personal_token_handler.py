@@ -4,37 +4,24 @@ from uuid import uuid4
 
 import pytest
 
-from identity.application.api_tokens.manage_personal_tokens import PersonalTokenHandler
+from identity.application.api_tokens.manage_personal_tokens import (
+    CreatePersonalTokenHandler,
+    PersonalTokenQueryHandler,
+    RevokePersonalTokenHandler,
+    RotatePersonalTokenHandler,
+)
 from identity.application.api_tokens.personal_token_messages import (
     CreatePersonalTokenCommand,
     ListPersonalTokensQuery,
+    RevokePersonalTokenCommand,
     RotatePersonalTokenCommand,
 )
-from identity.domain.browser_errors import BrowserAuthenticationRejected
 from identity.domain.errors import IdentityValidationError
-from identity.domain.records import ApiTokenStatus, PersonalApiToken, SessionPrincipal
+from identity.domain.records import ApiTokenStatus, PersonalApiToken
 
 
-def test_personal_tokens_are_bound_to_authenticated_user_project_and_allowed_scopes():
+def test_create_and_list_personal_tokens_are_scoped_to_user_project_and_allowed_scopes():
     owner, project_a, project_b = uuid4(), uuid4(), uuid4()
-    principal = SessionPrincipal(
-        owner, "owner", uuid4(), project_a, "project-a", "developer", (), (), "csrf"
-    )
-
-    class Sessions:
-        async def authenticate_session(self, **kwargs):
-            return (
-                (principal, "digest")
-                if kwargs["project_id"] in (None, project_a, project_b)
-                else None
-            )
-
-        async def authorize_browser_operation(self, *_args, **_kwargs):
-            return principal
-
-        async def validate_csrf(self, *_args):
-            return True
-
     class Tokens:
         items = []
 
@@ -69,164 +56,107 @@ def test_personal_tokens_are_bound_to_authenticated_user_project_and_allowed_sco
         def generate(self):
             return "one-time-secret"
 
-    def clock():
-        return datetime.now(UTC)
-
-    tokens = Tokens()
-    handler = PersonalTokenHandler(
+    tokens, hasher = Tokens(), Hasher()
+    creator = CreatePersonalTokenHandler(
         tokens,
-        Sessions(),
-        Hasher(),
+        hasher,
         Generator(),
-        clock,
         ("catalog:read", "resources:read"),
-        ("https://hub.test",),
     )
+    reader = PersonalTokenQueryHandler(tokens)
     created, secret = asyncio.run(
-        handler.execute(
+        creator.execute(
             CreatePersonalTokenCommand(
-                "session", "csrf", "https://hub.test", "build", ("catalog:read",), 2
+                owner, project_a, "build", ("catalog:read",), 2
             )
         )
     )
     assert secret == "one-time-secret"
     assert created.scopes == ("catalog:read",)
-    assert asyncio.run(handler.execute(ListPersonalTokensQuery("session", project_a))) == (created,)
-    assert asyncio.run(handler.execute(ListPersonalTokensQuery("session", project_b))) == ()
-    assert asyncio.run(handler.execute(ListPersonalTokensQuery("session"))) == (created,)
-
+    assert asyncio.run(reader.execute(ListPersonalTokensQuery(owner, project_a))) == (created,)
+    assert asyncio.run(reader.execute(ListPersonalTokensQuery(owner, project_b))) == ()
+    assert asyncio.run(reader.execute(ListPersonalTokensQuery(owner))) == (created,)
     with pytest.raises(IdentityValidationError):
         asyncio.run(
-            handler.execute(
+            creator.execute(
                 CreatePersonalTokenCommand(
-                    "session", "csrf", "https://hub.test", "wide", ("admin:*",), 2
+                    owner, project_a, "wide", ("admin:*",), 2
                 )
             )
         )
 
 
-def test_revoked_browser_session_cannot_rotate_or_create_personal_tokens():
-    principal = SessionPrincipal(
-        uuid4(), "owner", uuid4(), uuid4(), "project", "developer", (), (), "csrf"
-    )
-
-    class Sessions:
-        async def authorize_browser_operation(self, *_args, **_kwargs):
-            return None
-
-        async def validate_csrf(self, *_args):
-            return False
-
-    class Tokens:
-        async def lock_personal_token(self, token_id):
-            return ApiTokenStatus(token_id, principal.user_id, principal.project_id, None)
-
-    class Unused:
-        def digest(self, value):
-            return value
-
-        def generate(self):
-            return "secret"
-
-    handler = PersonalTokenHandler(
-        Tokens(),
-        Sessions(),
-        Unused(),
-        Unused(),
-        lambda: datetime.now(UTC),
-        ("catalog:read",),
-        ("https://hub.test",),
-    )
-    command = RotatePersonalTokenCommand("revoked", "csrf", "https://hub.test", uuid4())
-    with pytest.raises(BrowserAuthenticationRejected):
-        asyncio.run(handler.execute(command))
-
-
-def test_invalid_origin_is_rejected_before_locking_token_identifier():
-    token_id = uuid4()
-
-    class Sessions:
-        async def authorize_browser_operation(self, *_args, **_kwargs):
-            raise AssertionError("origin must fail before session and database locks")
+def test_rotation_locks_token_before_owner_check():
+    owner, project, token_id = uuid4(), uuid4(), uuid4()
 
     class Tokens:
         locked = False
 
         async def lock_personal_token(self, _token_id):
             self.locked = True
-            return None
+            return ApiTokenStatus(token_id, owner, project, None)
 
-    class Unused:
+    class Hasher:
         def digest(self, value):
             return value
 
+    class Generator:
         def generate(self):
             return "secret"
 
     tokens = Tokens()
-    handler = PersonalTokenHandler(
-        tokens,
-        Sessions(),
-        Unused(),
-        Unused(),
-        lambda: datetime.now(UTC),
-        ("catalog:read",),
-        ("https://hub.test",),
-    )
-    with pytest.raises(BrowserAuthenticationRejected):
-        asyncio.run(handler.execute(RotatePersonalTokenCommand("session", "csrf", None, token_id)))
-    assert not tokens.locked
+    handler = RotatePersonalTokenHandler(tokens, Hasher(), Generator(), ("catalog:read",))
+    assert asyncio.run(handler.execute(RotatePersonalTokenCommand(uuid4(), token_id))) is None
+    assert tokens.locked
 
 
-def test_rotation_repository_call_preserves_original_expiry_and_allowed_scope_ceiling():
+def test_rotation_keeps_expiry_and_scope_ceiling():
     owner, project, old_id, new_id = uuid4(), uuid4(), uuid4(), uuid4()
-    now = datetime.now(UTC)
-    previous = PersonalApiToken(
-        old_id, "deploy", project, ("catalog:read",), now + timedelta(minutes=5), now
+    current = datetime.now(UTC)
+    old = PersonalApiToken(
+        old_id, "deploy", project, ("catalog:read",), current + timedelta(minutes=5), current
     )
-
-    class Sessions:
-        async def authorize_browser_operation(self, *_args, **_kwargs):
-            return SessionPrincipal(
-                owner, "owner", uuid4(), project, "project", "developer", (), (), "csrf"
-            )
-
-        async def validate_csrf(self, *_args):
-            return True
-
     class Tokens:
         async def lock_personal_token(self, _token_id):
             return ApiTokenStatus(old_id, owner, project, None)
 
         async def rotate_personal_token(self, **kwargs):
             assert kwargs["allowed_scopes"] == ("catalog:read",)
-            return PersonalApiToken(
-                new_id, previous.name, project, previous.scopes, previous.expires_at, None
-            )
+            return PersonalApiToken(new_id, old.name, project, old.scopes, old.expires_at, None)
 
         async def record_token_audit(self, _event):
             return None
+
+    class Hasher:
+        def digest(self, _value):
+            return "digest"
 
     class Generator:
         def generate(self):
             return "replacement-secret"
 
-    class Hasher:
-        def digest(self, value):
-            return "digest"
-
-    handler = PersonalTokenHandler(
-        Tokens(),
-        Sessions(),
-        Hasher(),
-        Generator(),
-        lambda: now,
-        ("catalog:read",),
-        ("https://hub.test",),
-    )
+    handler = RotatePersonalTokenHandler(Tokens(), Hasher(), Generator(), ("catalog:read",))
     rotated, secret = asyncio.run(
-        handler.execute(RotatePersonalTokenCommand("session", "csrf", "https://hub.test", old_id))
+        handler.execute(RotatePersonalTokenCommand(owner, old_id))
     )
     assert secret == "replacement-secret"
     assert rotated.token_id == new_id
-    assert rotated.expires_at == previous.expires_at
+    assert rotated.expires_at == old.expires_at
+    assert rotated.scopes == old.scopes
+
+
+def test_revoke_handler_has_minimal_dependencies_and_revokes_owned_token():
+    owner, project, token_id = uuid4(), uuid4(), uuid4()
+    class Tokens:
+        async def lock_personal_token(self, _token_id):
+            return ApiTokenStatus(token_id, owner, project, None)
+
+        async def revoke_personal_token(self, **kwargs):
+            assert kwargs["user_id"] == owner
+            assert kwargs["token_id"] == token_id
+            return True
+
+    handler = RevokePersonalTokenHandler(Tokens())
+    assert asyncio.run(
+        handler.execute(RevokePersonalTokenCommand(owner, token_id))
+    )

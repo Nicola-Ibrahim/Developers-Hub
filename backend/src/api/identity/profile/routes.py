@@ -5,6 +5,7 @@ from typing import Annotated
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Header, Request, Response
 
+from api.composition.identity_preconditions import browser_write_precondition, execute_browser_write
 from api.identity.authentication.credentials import (
     CSRF_HEADER,
     browser_credentials,
@@ -12,6 +13,7 @@ from api.identity.authentication.credentials import (
 )
 from api.identity.profile.schemas import ProfileView, SecurityActivityView, UpdateProfileBody
 from identity.application.interfaces.dispatch import IdentityModule
+from identity.application.interfaces.security import TokenHasher
 from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery
 from identity.application.profile.update_profile import UpdateProfileCommand
 
@@ -36,17 +38,17 @@ async def patch_profile(
     body: UpdateProfileBody,
     request: Request,
     response: Response,
-    csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
+    _csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
     module: FromDishka[IdentityModule],
+    hasher: FromDishka[TokenHasher],
 ) -> ProfileView:
-    profile = await module.execute(
-        UpdateProfileCommand(
-            require_cookie_session(browser_credentials(request)),
-            body.display_name,
-            csrf_token,
-            request.headers.get("origin"),
-        )
+    command = UpdateProfileCommand(
+        request.state.identity_principal.user_id,
+        body.display_name,
     )
+    profile = await execute_browser_write(module, command, browser_write_precondition(
+        request, request.state.identity_principal.user_id, hasher
+    ))
     response.headers["Cache-Control"] = "no-store"
     return ProfileView(
         userId=profile.user_id, userName=profile.user_name, displayName=profile.display_name

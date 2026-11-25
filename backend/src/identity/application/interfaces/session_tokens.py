@@ -2,9 +2,9 @@ from datetime import datetime
 from typing import Protocol
 
 
-class BrowserSessionTokenIssuer(Protocol):
+class SessionTokenIssuer(Protocol):
     def issue(self, subject: str, issued_at: datetime, expires_at: datetime) -> str: ...
 
 
-class BrowserSessionTokenVerifier(Protocol):
+class SessionTokenVerifier(Protocol):
     def verify(self, token: str) -> bool: ...

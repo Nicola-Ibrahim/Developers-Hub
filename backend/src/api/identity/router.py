@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from api.core.errors import APIError
 from api.identity.authentication.credentials import (
     browser_credentials,
+    require_browser_mutation,
     require_cookie_session,
     require_valid_browser_session,
 )
@@ -19,9 +20,10 @@ from api.identity.profile.routes import router as profile_router
 from api.identity.sessions.routes import router as sessions_router
 from api.identity.tokens.routes import router as tokens_router
 from api.platform.projects.memberships import router as memberships_router
+from api.settings.config import BrowserCookiePolicy
 from identity.application.interfaces.authorization import AuthorizationDecisionPort
-from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
 from identity.application.interfaces.dispatch import IdentityModule
+from identity.application.interfaces.session_tokens import SessionTokenVerifier
 
 _IDENTITY_ACTIONS = {
     "browser_me": "identity.sessions.read",
@@ -49,13 +51,17 @@ async def identity_route_permission(
     request: Request,
     module: FromDishka[IdentityModule],
     authorizer: FromDishka[AuthorizationDecisionPort],
-    session_tokens: FromDishka[BrowserSessionTokenVerifier],
+    session_tokens: FromDishka[SessionTokenVerifier],
+    cookie_policy: FromDishka[BrowserCookiePolicy],
 ) -> None:
     route_name = request.scope["route"].name
     if route_name == "login":
         return
     credentials = browser_credentials(request)
     require_valid_browser_session(credentials, session_tokens)
+    require_cookie_session(credentials)
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        require_browser_mutation(request, cookie_policy.allowed_origins)
     action = _IDENTITY_ACTIONS.get(route_name)
     if action is None:
         raise APIError(403, "forbidden", "Permission denied")

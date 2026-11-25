@@ -5,7 +5,7 @@ from typing import TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from identity.application.interfaces.browser_transactions import BrowserTransaction
+from identity.application.interfaces.identity_transactions import IdentityTransaction
 from identity.application.shared.errors import IdentityUnavailable
 from identity.domain.interfaces.session_repository import SessionRepository
 from identity.domain.interfaces.user_repository import UserRepository
@@ -14,7 +14,7 @@ from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchem
 T = TypeVar("T")
 
 
-class SqlAlchemyIdentityTransaction(BrowserTransaction):
+class SqlAlchemyIdentityTransaction(IdentityTransaction):
     def __init__(
         self,
         sessions: async_sessionmaker[AsyncSession],

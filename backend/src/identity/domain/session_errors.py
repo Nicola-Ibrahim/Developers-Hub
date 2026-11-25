@@ -1,9 +1,9 @@
-"""Browser-specific safe authentication failure."""
+"""Session authentication failure."""
 
 from identity.domain.errors import AuthenticationRejected
 
 
-class BrowserAuthenticationRejected(AuthenticationRejected):
+class SessionAuthenticationRejected(AuthenticationRejected):
     code = "authentication_rejected"
     message = "Credentials or browser session are invalid"
 

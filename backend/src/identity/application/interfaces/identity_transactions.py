@@ -9,7 +9,7 @@ from identity.domain.interfaces.user_repository import UserRepository
 T = TypeVar("T")
 
 
-class BrowserTransaction(Protocol):
+class IdentityTransaction(Protocol):
     async def run(
         self, action: Callable[[UserRepository, SessionRepository], Awaitable[T]]
     ) -> T: ...

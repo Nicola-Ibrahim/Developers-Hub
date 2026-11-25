@@ -6,6 +6,7 @@ from uuid import UUID
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Header, Request, Response
 
+from api.composition.identity_preconditions import browser_write_precondition, execute_browser_write
 from api.identity.authentication.credentials import (
     CSRF_HEADER,
     SESSION_COOKIE,
@@ -17,6 +18,7 @@ from api.identity.sessions.schemas import PasswordBody
 from api.settings.config import BrowserCookiePolicy
 from identity.application.accounts.change_password.command import ChangePasswordCommand
 from identity.application.interfaces.dispatch import IdentityModule
+from identity.application.interfaces.security import TokenHasher
 from identity.application.sessions.list_sessions.query import ListSessionsQuery
 from identity.application.sessions.revoke_session.command import RevokeSessionCommand
 from identity.application.sessions.rotate_csrf.command import RotateCsrfCommand
@@ -86,19 +88,20 @@ async def revoke_session(
 async def change_password(
     body: PasswordBody,
     request: Request,
-    csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
+    _csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
     response: Response,
     module: FromDishka[IdentityModule],
     cookie_policy: FromDishka[BrowserCookiePolicy],
+    hasher: FromDishka[TokenHasher],
 ) -> Response:
-    await module.execute(
-        ChangePasswordCommand(
-            require_cookie_session(browser_credentials(request)),
-            body.current_password,
-            body.new_password,
-            csrf_token,
-            request.headers.get("origin"),
-        )
+    actor = request.state.identity_principal
+    command = ChangePasswordCommand(
+        actor.user_id, actor.user_name, body.current_password, body.new_password
+    )
+    await execute_browser_write(
+        module,
+        command,
+        browser_write_precondition(request, actor.user_id, hasher),
     )
     response.delete_cookie(
         SESSION_COOKIE,

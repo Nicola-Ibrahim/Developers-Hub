@@ -99,13 +99,14 @@ def test_membership_administration_enforces_role_project_and_admin_retention(pos
             == 204
         )
         member_headers = login(member, member_name, project_a)
-        assert member.get(route).status_code == 401
-        assert (
-            member.put(
-                f"{route}/{member_id}", headers=member_headers, json={"role": "admin"}
-            ).status_code
-            == 401
+        denied_read = member.get(route)
+        assert denied_read.status_code == 403
+        assert denied_read.json()["code"] == "forbidden"
+        denied_write = member.put(
+            f"{route}/{member_id}", headers=member_headers, json={"role": "admin"}
         )
+        assert denied_write.status_code == 403
+        assert denied_write.json()["code"] == "forbidden"
         assert member.get("/api/v1/me/sessions").status_code == 200
         assert admin.delete(f"{route}/{admin_id}", headers=headers).status_code == 422
         assert (

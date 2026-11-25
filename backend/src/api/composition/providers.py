@@ -8,7 +8,6 @@ from api.health.metrics_adapter import DatabaseOperationalMetrics
 from api.platform.module import PlatformRequestModule
 from api.settings.config import BrowserCookiePolicy
 from devops_platform.application.interfaces.module import DeveloperPlatformModule
-from shared.infra.clock import Clock
 from shared.infra.settings import Settings
 
 
@@ -19,10 +18,13 @@ class ApiCompositionProvider(Provider):
 
     @provide(scope=Scope.APP)
     def browser_cookie_policy(self, settings: Settings) -> BrowserCookiePolicy:
-        return BrowserCookiePolicy(secure=settings.cookie_secure)
+        return BrowserCookiePolicy(
+            secure=settings.cookie_secure,
+            allowed_origins=settings.browser_allowed_origins,
+        )
 
     @provide(scope=Scope.REQUEST)
     def platform_module(
-        self, container: AsyncContainer, request: Request, settings: Settings, clock: Clock
+        self, container: AsyncContainer, request: Request, settings: Settings
     ) -> DeveloperPlatformModule:
-        return PlatformRequestModule(container, request, settings, clock)
+        return PlatformRequestModule(container, request, settings)

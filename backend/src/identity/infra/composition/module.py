@@ -11,7 +11,12 @@ from identity.application.api_tokens.authenticate_api_token.handler import (
     AuthenticateApiTokenHandler,
 )
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
-from identity.application.api_tokens.manage_personal_tokens import PersonalTokenHandler
+from identity.application.api_tokens.manage_personal_tokens import (
+    CreatePersonalTokenHandler,
+    PersonalTokenQueryHandler,
+    RevokePersonalTokenHandler,
+    RotatePersonalTokenHandler,
+)
 from identity.application.api_tokens.personal_token_messages import (
     CreatePersonalTokenCommand,
     ListPersonalTokensQuery,
@@ -26,7 +31,12 @@ from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.handler import LoginHandler
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
-from identity.application.profile.handlers import ProfileHandler, SecurityHistoryHandler
+from identity.application.interfaces.dispatch import ActionPrecondition
+from identity.application.profile.handlers import (
+    ReadProfileHandler,
+    SecurityHistoryHandler,
+    UpdateProfileHandler,
+)
 from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery
 from identity.application.profile.update_profile import UpdateProfileCommand
 from identity.application.sessions.list_sessions.handler import ListSessionsHandler
@@ -44,6 +54,9 @@ from identity.application.sessions.select_active_project.handler import (
     SelectActiveProjectHandler,
 )
 from identity.application.shared.errors import IdentityUnavailable
+from identity.domain.interfaces.api_token_repository import ApiTokenRepository
+from identity.domain.interfaces.session_repository import SessionRepository
+from identity.domain.session_errors import SessionAuthenticationRejected
 from shared.dispatch import Command, HandlerRegistry, ModuleDispatcher, Query
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork
 
@@ -58,18 +71,18 @@ IDENTITY_HANDLER_REGISTRY = HandlerRegistry(
         (RevokeAllSessionsCommand, RevokeAllSessionsHandler),
         (RevokeSessionCommand, RevokeSessionHandler),
         (ChangePasswordCommand, ChangePasswordHandler),
-        (UpdateProfileCommand, ProfileHandler),
-        (CreatePersonalTokenCommand, PersonalTokenHandler),
-        (RotatePersonalTokenCommand, PersonalTokenHandler),
-        (RevokePersonalTokenCommand, PersonalTokenHandler),
+        (UpdateProfileCommand, UpdateProfileHandler),
+        (CreatePersonalTokenCommand, CreatePersonalTokenHandler),
+        (RotatePersonalTokenCommand, RotatePersonalTokenHandler),
+        (RevokePersonalTokenCommand, RevokePersonalTokenHandler),
     ),
     queries=(
         (AuthenticateApiTokenQuery, AuthenticateApiTokenHandler),
         (AuthenticateSessionQuery, AuthenticateSessionHandler),
         (ListSessionsQuery, ListSessionsHandler),
-        (ProfileQuery, ProfileHandler),
+        (ProfileQuery, ReadProfileHandler),
         (SecurityHistoryQuery, SecurityHistoryHandler),
-        (ListPersonalTokensQuery, PersonalTokenHandler),
+        (ListPersonalTokensQuery, PersonalTokenQueryHandler),
     ),
     required_commands=(
         LoginCommand,
@@ -103,9 +116,24 @@ class IdentityModuleDispatcher(ModuleDispatcher):
     async def execute(self, command: Command[ResultT]) -> ResultT:
         if type(command) not in IDENTITY_HANDLER_REGISTRY.commands:
             return await super().execute(command)
-        if type(command) in (LoginCommand, ChangePasswordCommand):
+        if type(command) is ChangePasswordCommand:
+            raise SessionAuthenticationRejected()
+        if type(command) is LoginCommand:
             return await super().execute(command)
         return await self._dispatch_action(lambda dispatcher: dispatcher.execute(command))
+
+    async def execute_with_precondition(
+        self, command: Command[ResultT], precondition: ActionPrecondition
+    ) -> ResultT:
+        """Run an API supplied browser guard in the handler's ACTION transaction."""
+        if type(command) is ChangePasswordCommand:
+            handler = await self._container.get(ChangePasswordHandler)
+            return await handler.execute(command, precondition)
+        if type(command) not in IDENTITY_HANDLER_REGISTRY.commands:
+            return await self.execute(command)
+        return await self._dispatch_action(
+            lambda dispatcher: dispatcher.execute(command), precondition
+        )
 
     async def query(self, query: Query[ResultT]) -> ResultT:
         if type(query) not in IDENTITY_HANDLER_REGISTRY.queries:
@@ -115,7 +143,9 @@ class IdentityModuleDispatcher(ModuleDispatcher):
         return await self._dispatch_action(lambda dispatcher: dispatcher.query(query))
 
     async def _dispatch_action(
-        self, dispatch: Callable[[ModuleDispatcher], Awaitable[ResultT]]
+        self,
+        dispatch: Callable[[ModuleDispatcher], Awaitable[ResultT]],
+        precondition: ActionPrecondition | None = None,
     ) -> ResultT:
         async with self._container(scope=Scope.ACTION) as action_container:
             dispatcher = ModuleDispatcher(
@@ -125,9 +155,21 @@ class IdentityModuleDispatcher(ModuleDispatcher):
                 ),
             )
             unit = await action_container.get(SqlAlchemyUnitOfWork, component="identity_action")
+
+            async def run() -> ResultT:
+                if precondition is not None:
+                    sessions = await action_container.get(
+                        SessionRepository, component="identity_action"
+                    )
+                    tokens = await action_container.get(
+                        ApiTokenRepository, component="identity_action"
+                    )
+                    await precondition(sessions, tokens)
+                return await dispatch(dispatcher)
+
             try:
                 return await unit.run(
-                    lambda: dispatch(dispatcher),
+                    run,
                     lambda result: result,
                 )
             except DatabaseUnavailable as error:

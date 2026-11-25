@@ -9,15 +9,14 @@ from devops_platform.infra.persistence.models.project_access import ProjectMembe
 from devops_platform.infra.persistence.repositories.project_access import (
     SQLAlchemyProjectAccessRepository,
     SQLAlchemyProjectAccessRules,
-    lock_named_project,
     lock_user_project_access,
     project_membership_role,
     project_memberships,
 )
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
-from identity.domain.browser_errors import BrowserAuthenticationRejected
 from identity.domain.errors import IdentityValidationError
 from identity.domain.interfaces.project_access import IdentityProjectAccess
+from identity.domain.session_errors import SessionAuthenticationRejected
 from identity.infra.persistence.models.api_token import ApiAccessTokenRow
 from identity.infra.persistence.models.user import InternalUserRow
 from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
@@ -42,9 +41,6 @@ class SqlAlchemyIdentityProjectAccess:
 
     async def project_membership_role(self, user_id: UUID, project_id: UUID) -> str | None:
         return await project_membership_role(self._session, user_id, project_id)
-
-    async def lock_named_project(self, name: str) -> UUID | None:
-        return await lock_named_project(self._session, name)
 
     async def lock_project_membership(self, user_id: UUID, project_id: UUID) -> bool:
         membership = await self._session.get(
@@ -124,5 +120,5 @@ def project_access_repository_for_session(
         user_row=InternalUserRow,
         record_activity=activity.record_project_access_activity,
         validation_error=IdentityValidationError,
-        authorization_error=BrowserAuthenticationRejected,
+        authorization_error=SessionAuthenticationRejected,
     )

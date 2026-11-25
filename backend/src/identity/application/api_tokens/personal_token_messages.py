@@ -1,6 +1,6 @@
 """Identity dispatcher messages for personal token management."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from uuid import UUID
 
 from identity.domain.records import PersonalApiToken
@@ -9,15 +9,14 @@ from shared.dispatch import Command, Query
 
 @dataclass(frozen=True, slots=True)
 class ListPersonalTokensQuery(Query[tuple[PersonalApiToken, ...]]):
-    session_token: str = field(repr=False)
+    actor_id: UUID
     project_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class CreatePersonalTokenCommand(Command[tuple[PersonalApiToken, str]]):
-    session_token: str = field(repr=False)
-    csrf_token: str = field(repr=False)
-    origin: str | None
+    actor_id: UUID
+    project_id: UUID | None
     name: str
     scopes: tuple[str, ...]
     hours: int
@@ -25,15 +24,11 @@ class CreatePersonalTokenCommand(Command[tuple[PersonalApiToken, str]]):
 
 @dataclass(frozen=True, slots=True)
 class RotatePersonalTokenCommand(Command[tuple[PersonalApiToken, str] | None]):
-    session_token: str = field(repr=False)
-    csrf_token: str = field(repr=False)
-    origin: str | None
+    actor_id: UUID
     token_id: UUID
 
 
 @dataclass(frozen=True, slots=True)
 class RevokePersonalTokenCommand(Command[bool]):
-    session_token: str = field(repr=False)
-    csrf_token: str = field(repr=False)
-    origin: str | None
+    actor_id: UUID
     token_id: UUID

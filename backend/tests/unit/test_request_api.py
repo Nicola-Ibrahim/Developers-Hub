@@ -43,8 +43,8 @@ from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import PlatformRequestError
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
 from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
-from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
 from identity.application.interfaces.dispatch import IdentityModule
+from identity.application.interfaces.session_tokens import SessionTokenVerifier
 from identity.contracts import AuthenticatedPrincipal
 from identity.domain.errors import AuthenticationRejected
 from identity.domain.records import MembershipDetails, SessionPrincipal
@@ -220,7 +220,7 @@ class ApiOnlyPlatformProvider(Provider):
         return FakeIdentityModule()
 
     @provide(scope=Scope.APP)
-    def session_tokens(self) -> BrowserSessionTokenVerifier:
+    def session_tokens(self) -> SessionTokenVerifier:
         return FakeSessionTokenVerifier()
 
 

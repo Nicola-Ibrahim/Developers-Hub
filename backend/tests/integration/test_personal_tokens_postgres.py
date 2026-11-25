@@ -5,154 +5,174 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy import select
 from sqlalchemy.orm import Session
-from test_browser_identity_postgres import ORIGIN, PEPPER, IdentityFixture, seed_user
-from test_foundation_postgres import async_engine_for
+from test_foundation_postgres import async_engine_for, mutation_request
 
-from composition.integrations.project_access_persistence import (
-    api_token_repository_for_session,
-    identity_repositories_for_session,
-)
+from api.composition.identity_preconditions import browser_write_precondition
+from api.core.errors import APIError
+from composition.container import BackendContainer
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
-from identity.application.api_tokens.manage_personal_tokens import PersonalTokenHandler
 from identity.application.api_tokens.personal_token_messages import (
     CreatePersonalTokenCommand,
     ListPersonalTokensQuery,
     RotatePersonalTokenCommand,
 )
-from identity.application.authentication.login.command import LoginCommand
-from identity.application.authentication.logout.command import LogoutCommand
-from identity.domain.browser_errors import BrowserAuthenticationRejected
+from identity.application.interfaces.dispatch import IdentityModule
 from identity.infra.persistence.models.api_token import ApiAccessTokenRow
+from identity.infra.persistence.models.session import SessionRow
 from identity.infra.persistence.models.user import InternalUserRow
-from identity.infra.security.passwords import ScryptPasswordHasher
-from identity.infra.security.tokens import PepperedTokenHasher, SecureTokenGenerator
-from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
+from identity.infra.security.opaque_secrets import PepperedTokenHasher
+from shared.infra.settings import Settings
 
 pytestmark = pytest.mark.postgres
+ORIGIN = "http://localhost:3000"
+PEPPER = "browser-test-pepper-" * 3
 
 
 def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_expiry(
     postgres_engine,
 ):
-    user_id, project_a, username = seed_user(postgres_engine)
-    project_b, other_user, other_name = uuid4(), uuid4(), f"operator-{uuid4()}"
+    user_id, other_user = uuid4(), uuid4()
+    project_a, project_b = uuid4(), uuid4()
+    username, other_name = f"operator-{user_id}", f"operator-{other_user}"
+    seeded_at = datetime.now(UTC)
+    first_session, first_csrf = "first-session", "first-csrf"
+    second_session, second_csrf = "second-session", "second-csrf"
+    hasher = PepperedTokenHasher(PEPPER)
     with Session(postgres_engine) as session, session.begin():
-        session.add(ProjectRow(id=project_b, name=f"project-{project_b}"))
-        session.flush()
-        session.add(
-            InternalUserRow(
-                id=other_user,
-                name=other_name,
-                active=True,
-                password_hash=ScryptPasswordHasher().hash("local-safe-test-password"),
-            )
+        session.add_all(
+            [
+                InternalUserRow(id=user_id, name=username, active=True, credential_version=1),
+                InternalUserRow(id=other_user, name=other_name, active=True, credential_version=1),
+                ProjectRow(id=project_a, name=f"project-{project_a}"),
+                ProjectRow(id=project_b, name=f"project-{project_b}"),
+            ]
         )
         session.flush()
         session.add_all(
             [
+                ProjectMembershipRow(user_id=user_id, project_id=project_a, role="developer"),
                 ProjectMembershipRow(user_id=user_id, project_id=project_b, role="developer"),
                 ProjectMembershipRow(user_id=other_user, project_id=project_a, role="developer"),
             ]
         )
+        for owner_id, project_id, raw_token, raw_csrf in (
+            (user_id, project_a, first_session, first_csrf),
+            (user_id, project_b, second_session, second_csrf),
+        ):
+            session.add(
+                SessionRow(
+                    id=uuid4(),
+                    user_id=owner_id,
+                    token_digest=hasher.digest(raw_token),
+                    csrf_digest=hasher.digest(raw_csrf),
+                    selected_project_id=project_id,
+                    credential_version=1,
+                    created_at=seeded_at,
+                    last_seen_at=seeded_at,
+                    idle_expires_at=seeded_at + timedelta(hours=8),
+                    absolute_expires_at=seeded_at + timedelta(days=7),
+                    revoked_at=None,
+                )
+            )
 
     database = async_engine_for(postgres_engine)
-    sessions = async_sessionmaker(database, expire_on_commit=False)
-    fixed_now = [datetime(2026, 11, 1, tzinfo=UTC)]
-    identity = IdentityFixture(sessions, lambda: fixed_now[0])
-    hasher = PepperedTokenHasher(PEPPER)
-    generator = SecureTokenGenerator()
+    settings = Settings(
+        database_url="postgresql+psycopg://localhost/devops_hub_test",
+        token_pepper=PEPPER,
+        browser_allowed_origins=(ORIGIN,),
+    )
 
-    async def token_action(message):
-        session = sessions()
-        _users, browser_sessions = identity_repositories_for_session(session)
-        token_repository = api_token_repository_for_session(session)
-        handler = PersonalTokenHandler(
-            token_repository,
-            browser_sessions,
+    def first_guard(*, token_id=None, check_project=False):
+        return browser_write_precondition(
+            mutation_request(first_session, first_csrf, ORIGIN),
+            user_id,
             hasher,
-            generator,
-            lambda: fixed_now[0],
-            ("catalog:read", "resources:read"),
-            (ORIGIN,),
+            token_id=token_id,
+            expected_project_id=project_a,
+            check_project=check_project,
         )
-        assert token_repository._session is browser_sessions._session is session
-        unit = SqlAlchemyUnitOfWork(session)
-        assert unit.session is session
-        return await unit.run(lambda: handler.execute(message), lambda result: result)
+
+    def second_guard():
+        return browser_write_precondition(
+            mutation_request(second_session, second_csrf, ORIGIN),
+            user_id,
+            hasher,
+            expected_project_id=project_b,
+            check_project=True,
+        )
+
+    async def use_module(identity: IdentityModule):
+        created_a, _ = await identity.execute_with_precondition(
+            CreatePersonalTokenCommand(user_id, project_a, "a", ("catalog:read",), 1),
+            first_guard(check_project=True),
+        )
+        created_b, _ = await identity.execute_with_precondition(
+            CreatePersonalTokenCommand(user_id, project_b, "b", ("resources:read",), 8),
+            second_guard(),
+        )
+        assert [
+            item.token_id
+            for item in await identity.query(ListPersonalTokensQuery(user_id, project_a))
+        ] == [created_a.token_id]
+        assert [
+            item.token_id
+            for item in await identity.query(ListPersonalTokensQuery(user_id, project_b))
+        ] == [created_b.token_id]
+        assert await identity.query(ListPersonalTokensQuery(other_user, project_a)) == ()
+
+        rotated, secret = await identity.execute_with_precondition(
+            RotatePersonalTokenCommand(user_id, created_a.token_id),
+            first_guard(token_id=created_a.token_id),
+        )
+        assert secret
+        assert rotated.token_id != created_a.token_id
+        assert rotated.expires_at == created_a.expires_at
+        assert rotated.scopes == created_a.scopes
+        with Session(postgres_engine) as session:
+            old = session.get(ApiAccessTokenRow, created_a.token_id)
+            new = session.get(ApiAccessTokenRow, rotated.token_id)
+            assert old is not None and old.revoked_at is not None
+            assert new is not None and new.revoked_at is None
+            assert new.expires_at == old.expires_at
+
+        with Session(postgres_engine) as session, session.begin():
+            current_session = session.scalar(
+                select(SessionRow).where(SessionRow.token_digest == hasher.digest(first_session))
+            )
+            assert current_session is not None
+            current_session.revoked_at = datetime.now(UTC)
+            switched_session = session.scalar(
+                select(SessionRow).where(SessionRow.token_digest == hasher.digest(second_session))
+            )
+            assert switched_session is not None
+            switched_session.selected_project_id = project_a
+
+        with pytest.raises(APIError) as revoked:
+            await identity.execute_with_precondition(
+                RotatePersonalTokenCommand(user_id, rotated.token_id),
+                first_guard(token_id=rotated.token_id),
+            )
+        assert revoked.value.status == 401
+        with pytest.raises(APIError) as stale_project:
+            await identity.execute_with_precondition(
+                CreatePersonalTokenCommand(user_id, project_b, "stale", ("resources:read",), 8),
+                second_guard(),
+            )
+        assert stale_project.value.status == 401
+        with Session(postgres_engine) as session:
+            preserved = session.get(ApiAccessTokenRow, rotated.token_id)
+            assert preserved is not None and preserved.revoked_at is None
+        assert await identity.query(ListPersonalTokensQuery(user_id, project_b)) == (created_b,)
 
     async def exercise():
+        container = BackendContainer(settings, engine=database).combined()
         try:
-            first = await identity.execute(
-                LoginCommand(username, "local-safe-test-password", project_a, ORIGIN)
-            )
-            second = await identity.execute(
-                LoginCommand(username, "local-safe-test-password", project_b, ORIGIN)
-            )
-            outsider = await identity.execute(
-                LoginCommand(other_name, "local-safe-test-password", project_a, ORIGIN)
-            )
-
-            created_a, _ = await token_action(
-                CreatePersonalTokenCommand(
-                    first.session_token, first.csrf_token, ORIGIN, "a", ("catalog:read",), 1
-                )
-            )
-            created_b, _ = await token_action(
-                CreatePersonalTokenCommand(
-                    second.session_token, second.csrf_token, ORIGIN, "b", ("resources:read",), 8
-                )
-            )
-            assert [
-                item.token_id
-                for item in await token_action(
-                    ListPersonalTokensQuery(first.session_token, project_a)
-                )
-            ] == [created_a.token_id]
-            assert [
-                item.token_id
-                for item in await token_action(
-                    ListPersonalTokensQuery(second.session_token, project_b)
-                )
-            ] == [created_b.token_id]
-            assert (
-                await token_action(ListPersonalTokensQuery(outsider.session_token, project_a)) == ()
-            )
-
-            fixed_now[0] += timedelta(minutes=10)
-            rotated, secret = await token_action(
-                RotatePersonalTokenCommand(
-                    first.session_token, first.csrf_token, ORIGIN, created_a.token_id
-                )
-            )
-            assert secret
-            assert rotated.token_id != created_a.token_id
-            assert rotated.expires_at == created_a.expires_at
-            assert rotated.scopes == created_a.scopes
-            with Session(postgres_engine) as session:
-                old = session.get(ApiAccessTokenRow, created_a.token_id)
-                new = session.get(ApiAccessTokenRow, rotated.token_id)
-                assert old is not None and old.revoked_at == fixed_now[0]
-                assert new is not None and new.revoked_at is None
-                assert new.expires_at == old.expires_at
-
-            still_active, _ = await token_action(
-                CreatePersonalTokenCommand(
-                    first.session_token, first.csrf_token, ORIGIN, "rollback", ("catalog:read",), 1
-                )
-            )
-            await identity.execute(LogoutCommand(first.session_token, first.csrf_token, ORIGIN))
-            with pytest.raises(BrowserAuthenticationRejected):
-                await token_action(
-                    RotatePersonalTokenCommand(
-                        first.session_token, first.csrf_token, ORIGIN, still_active.token_id
-                    )
-                )
-            with Session(postgres_engine) as session:
-                preserved = session.get(ApiAccessTokenRow, still_active.token_id)
-                assert preserved is not None and preserved.revoked_at is None
+            async with container() as scope:
+                await use_module(await scope.get(IdentityModule))
         finally:
+            await container.close()
             await database.dispose()
 
     asyncio.run(exercise())

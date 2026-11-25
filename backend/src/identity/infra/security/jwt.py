@@ -14,7 +14,7 @@ _ALGORITHM = "HS256"
 _INFO = b"developers-hub/browser-session-jwt/v1"
 
 
-class JwtBrowserSessionTokens:
+class JwtSessionTokens:
     def __init__(self, token_pepper: str) -> None:
         self._key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=_INFO).derive(
             token_pepper.encode()

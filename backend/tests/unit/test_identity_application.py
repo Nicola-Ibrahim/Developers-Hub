@@ -8,45 +8,26 @@ from identity.application.api_tokens.authenticate_api_token.handler import (
     AuthenticateApiTokenHandler,
 )
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
-from identity.application.api_tokens.issue_api_token.command import IssueApiTokenCommand
-from identity.application.api_tokens.issue_api_token.handler import IssueApiTokenHandler
-from identity.application.api_tokens.issue_api_token.result import PreparedApiToken
 from identity.application.api_tokens.revoke_api_token.command import RevokeApiTokenCommand
 from identity.application.api_tokens.revoke_api_token.handler import RevokeApiTokenHandler
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
-from identity.domain.errors import AuthenticationRejected, IdentityValidationError
-from identity.domain.records import ApiTokenStatus, ProjectMembershipStatus
-from identity.infra.security.credential_file import PrivateCredentialFile
-from identity.infra.security.tokens import PepperedTokenHasher, token_digest
+from identity.domain.errors import AuthenticationRejected
+from identity.domain.records import ApiTokenStatus
+from identity.infra.security.opaque_secrets import PepperedTokenHasher, token_digest
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 TOKEN = "a" * 40
 
 
 class FakeRepository:
-    def __init__(self, credential=None, identity_active=True, token=None, membership_error=None):
+    def __init__(self, credential=None, token=None):
         self.credential = credential
-        self.identity_active = identity_active
         self.token = token
-        self.membership_error = membership_error
-        self.user_id = uuid4()
-        self.project_id = uuid4()
-        self.issue_id = uuid4()
         self.calls = []
 
     async def find_token_credential(self, digest):
         self.calls.append(("find_token_credential", digest))
         return self.credential
-
-    async def require_project_membership(self, **kwargs):
-        self.calls.append(("require_project_membership", kwargs))
-        if self.membership_error is not None:
-            raise self.membership_error
-        return ProjectMembershipStatus(self.user_id, self.project_id, self.identity_active)
-
-    async def insert_api_token(self, **kwargs):
-        self.calls.append(("insert_api_token", kwargs))
-        return self.issue_id
 
     async def record_token_audit(self, event):
         self.calls.append(("record_token_audit", event))
@@ -72,23 +53,8 @@ class FakeHasher:
         return "synthetic-digest"
 
 
-class FakeGenerator:
-    def generate(self):
-        return TOKEN
-
-
-def issue_service(repository):
-    return IssueApiTokenHandler(
-        repository=repository,
-        hasher=PepperedTokenHasher("p" * 32),
-        generator=FakeGenerator(),
-        clock=lambda: NOW,
-        allowed_scopes=("catalog:read", "resources:read"),
-        default_scopes=("catalog:read",),
-    )
-
-
 def test_authenticate_api_token_reads_repository_and_rejects_malformed_before_query():
+    now = datetime.now(UTC)
     snapshot = ApiTokenAuthenticationDetails(
         uuid4(),
         uuid4(),
@@ -96,13 +62,13 @@ def test_authenticate_api_token_reads_repository_and_rejects_malformed_before_qu
         "developer",
         ("catalog:read",),
         True,
-        NOW + timedelta(hours=1),
+        now + timedelta(hours=1),
         None,
     )
     repository = FakeRepository(credential=snapshot)
     result = asyncio.run(
         AuthenticateApiTokenHandler(
-            FakeTransaction(repository), PepperedTokenHasher("p" * 32), lambda: NOW
+            FakeTransaction(repository), PepperedTokenHasher("p" * 32)
         ).execute(AuthenticateApiTokenQuery(TOKEN))
     )
     assert result.role == "developer"
@@ -113,7 +79,7 @@ def test_authenticate_api_token_reads_repository_and_rejects_malformed_before_qu
         with pytest.raises(AuthenticationRejected):
             asyncio.run(
                 AuthenticateApiTokenHandler(
-                    FakeTransaction(repository), PepperedTokenHasher("p" * 32), lambda: NOW
+                    FakeTransaction(repository), PepperedTokenHasher("p" * 32)
                 ).execute(AuthenticateApiTokenQuery(invalid))
             )
     assert len(repository.calls) == 1
@@ -129,6 +95,7 @@ def test_authenticate_api_token_reads_repository_and_rejects_malformed_before_qu
     ],
 )
 def test_authenticate_api_token_rejects_invalid_repository_snapshot(changes):
+    now = datetime.now(UTC)
     values = dict(
         token_id=uuid4(),
         user_id=uuid4(),
@@ -136,67 +103,17 @@ def test_authenticate_api_token_rejects_invalid_repository_snapshot(changes):
         role="developer",
         scopes=("catalog:read",),
         user_active=True,
-        expires_at=NOW + timedelta(hours=1),
+        expires_at=now + timedelta(hours=1),
         revoked_at=None,
     )
     values.update(changes)
     repository = FakeRepository(credential=ApiTokenAuthenticationDetails(**values))
     with pytest.raises(AuthenticationRejected):
         asyncio.run(
-            AuthenticateApiTokenHandler(
-                FakeTransaction(repository), FakeHasher(), lambda: NOW
-            ).execute(AuthenticateApiTokenQuery(TOKEN))
+            AuthenticateApiTokenHandler(FakeTransaction(repository), FakeHasher()).execute(
+                AuthenticateApiTokenQuery(TOKEN)
+            )
         )
-
-
-def test_issue_api_token_returns_private_completion_result_and_records_writes():
-    repository = FakeRepository()
-    prepared = asyncio.run(issue_service(repository).execute(IssueApiTokenCommand("dev", "demo")))
-    assert isinstance(prepared, PreparedApiToken)
-    assert prepared.token_id == repository.issue_id
-    assert prepared.secret == TOKEN
-    assert TOKEN not in repr(prepared)
-    assert [call[0] for call in repository.calls] == [
-        "require_project_membership",
-        "insert_api_token",
-        "record_token_audit",
-    ]
-    assert repository.calls[0][1] == {"user_name": "dev", "project_name": "demo"}
-    assert repository.calls[1][1]["digest"] == token_digest(TOKEN, "p" * 32)
-    assert repository.calls[2][1].action == "token_issued"
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        IssueApiTokenCommand("bad name", "demo"),
-        IssueApiTokenCommand("dev", "demo", hours=0),
-        IssueApiTokenCommand("dev", "demo", scopes=("admin:*",)),
-    ],
-)
-def test_issue_api_token_validates_before_repository_calls(command):
-    repository = FakeRepository()
-    with pytest.raises(IdentityValidationError):
-        asyncio.run(issue_service(repository).execute(command))
-    assert repository.calls == []
-
-
-def test_issue_api_token_rejects_disabled_user_before_token_or_audit():
-    repository = FakeRepository(identity_active=False)
-    with pytest.raises(IdentityValidationError):
-        asyncio.run(issue_service(repository).execute(IssueApiTokenCommand("dev", "demo")))
-    assert [call[0] for call in repository.calls] == ["require_project_membership"]
-
-
-def test_issue_api_token_rejects_missing_membership_before_token_or_audit():
-    repository = FakeRepository(
-        membership_error=IdentityValidationError(
-            "Active account and current project membership are required"
-        )
-    )
-    with pytest.raises(IdentityValidationError):
-        asyncio.run(issue_service(repository).execute(IssueApiTokenCommand("dev", "demo")))
-    assert [call[0] for call in repository.calls] == ["require_project_membership"]
 
 
 def test_revoke_api_token_is_idempotent_and_audits_only_first_revoke():
@@ -204,9 +121,7 @@ def test_revoke_api_token_is_idempotent_and_audits_only_first_revoke():
     missing = FakeRepository(token=None)
     assert (
         asyncio.run(
-            RevokeApiTokenHandler(FakeTransaction(missing), lambda: NOW).execute(
-                RevokeApiTokenCommand(token_id)
-            )
+            RevokeApiTokenHandler(FakeTransaction(missing)).execute(RevokeApiTokenCommand(token_id))
         )
         is False
     )
@@ -216,7 +131,7 @@ def test_revoke_api_token_is_idempotent_and_audits_only_first_revoke():
     repository = FakeRepository(token=existing)
     assert (
         asyncio.run(
-            RevokeApiTokenHandler(FakeTransaction(repository), lambda: NOW).execute(
+            RevokeApiTokenHandler(FakeTransaction(repository)).execute(
                 RevokeApiTokenCommand(token_id)
             )
         )
@@ -233,22 +148,10 @@ def test_revoke_api_token_is_idempotent_and_audits_only_first_revoke():
     repository.token = ApiTokenStatus(token_id, existing.user_id, existing.project_id, NOW)
     assert (
         asyncio.run(
-            RevokeApiTokenHandler(FakeTransaction(repository), lambda: NOW).execute(
+            RevokeApiTokenHandler(FakeTransaction(repository)).execute(
                 RevokeApiTokenCommand(token_id)
             )
         )
         is True
     )
     assert [call[0] for call in repository.calls] == ["find_api_token"]
-
-
-def test_private_credential_file_remains_exclusive_and_replacement_safe(tmp_path):
-    path = tmp_path / "credential.txt"
-    delivery = PrivateCredentialFile(path)
-    receipt = delivery.write_new(TOKEN)
-    assert path.read_text() == TOKEN + "\n"
-    assert path.stat().st_mode & 0o777 == 0o600
-    path.unlink()
-    path.write_text("unrelated")
-    receipt.remove_owned()
-    assert path.read_text() == "unrelated"

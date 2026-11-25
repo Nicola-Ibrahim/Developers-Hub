@@ -23,7 +23,7 @@ from composition.runtime import BackendRuntime
 from devops_platform.application.shared.errors import CatalogForbidden, PlatformRequestError
 from devops_platform.domain import DomainError
 from identity.application.interfaces.authorization import AuthorizationUnavailable
-from identity.application.shared.errors import CredentialDeliveryError, IdentityUnavailable
+from identity.application.shared.errors import IdentityUnavailable
 from identity.domain.errors import AuthenticationRejected, IdentityValidationError
 from shared.infra.settings import Settings
 
@@ -108,10 +108,6 @@ class DevOpsHubAPI(FastAPI):
         @app.exception_handler(IdentityValidationError)
         async def identity_invalid(request: Request, exc: IdentityValidationError) -> JSONResponse:
             return error_response(request, 422, exc.code, exc.message)
-
-        @app.exception_handler(CredentialDeliveryError)
-        async def delivery_failed(request: Request, exc: CredentialDeliveryError) -> JSONResponse:
-            return error_response(request, 500, exc.code, "Credential delivery failed")
 
         @app.exception_handler(DomainError)
         async def domain_error(request: Request, exc: DomainError) -> JSONResponse:

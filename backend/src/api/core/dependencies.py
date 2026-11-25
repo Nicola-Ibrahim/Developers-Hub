@@ -6,10 +6,10 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import Depends
 
 from api.core.security.request_identity import (
-    BrowserRequestCredentials,
     RequestIdentity,
     request_identity,
 )
+from api.identity.authentication.credentials import BrowserCredentials, require_cookie_session
 from api.identity.principal.schemas import PrincipalView
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import PlatformRequestError
@@ -23,9 +23,11 @@ async def current_principal(
     credentials: Annotated[RequestIdentity, Depends(request_identity)],
     identity: FromDishka[IdentityModule],
 ) -> PrincipalView:
-    if isinstance(credentials, BrowserRequestCredentials):
+    if isinstance(credentials, BrowserCredentials):
         principal = await identity.query(
-            AuthenticateSessionQuery(credentials.session_token, credentials.project_id)
+            AuthenticateSessionQuery(
+                require_cookie_session(credentials), credentials.project_id
+            )
         )
         if principal.project_id is None or principal.role not in {"developer", "admin"}:
             raise PlatformRequestError("project_required", "Select an authorized project", 409)

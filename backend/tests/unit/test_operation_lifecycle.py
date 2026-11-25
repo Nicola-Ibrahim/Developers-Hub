@@ -18,16 +18,12 @@ from sqlalchemy.pool import NullPool
 
 from api.app import create_app
 from composition.container import BackendContainer
-from identity.application.api_tokens.issue_api_token.command import IssueApiTokenCommand
-from identity.application.api_tokens.issue_api_token.result import PreparedApiToken
 from identity.application.interfaces.dispatch import IdentityModule
 from identity.application.shared.errors import IdentityUnavailable
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
-from identity.domain.records import ApiTokenStatus, ProjectMembershipStatus
-from identity.infra.composition.api_token_transactions import IssueApiTokenToFile
+from identity.domain.records import ApiTokenStatus
 from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
-from identity.infra.security.credential_file import PrivateCredentialFile
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
 
@@ -80,14 +76,6 @@ class FakeApiTokenRepository:
     async def find_token_credential(self, digest: str) -> ApiTokenAuthenticationDetails | None:
         return self.credential
 
-    async def require_project_membership(
-        self, *, user_name: str, project_name: str
-    ) -> ProjectMembershipStatus:
-        return ProjectMembershipStatus(uuid4(), uuid4(), True)
-
-    async def insert_api_token(self, **kwargs) -> object:
-        return uuid4()
-
     async def record_token_audit(self, event) -> None:
         return None
 
@@ -96,40 +84,6 @@ class FakeApiTokenRepository:
 
     async def revoke_api_token(self, token_id, revoked_at) -> None:
         return None
-
-
-class FakeInnerIssue:
-    def __init__(self, secret: str = TOKEN) -> None:
-        self.secret = secret
-        self.calls = 0
-
-    async def execute(self, command: IssueApiTokenCommand) -> PreparedApiToken:
-        self.calls += 1
-        return PreparedApiToken(uuid4(), self.secret)
-
-
-class FakeReceipt:
-    def __init__(self, fail_cleanup: bool = False) -> None:
-        self.removed = False
-        self.fail_cleanup = fail_cleanup
-
-    def remove_owned(self) -> None:
-        self.removed = True
-        if self.fail_cleanup:
-            raise OSError("private path and secret must not leak")
-
-
-class FakeDelivery:
-    def __init__(self, *, fail_write: bool = False, receipt: FakeReceipt | None = None) -> None:
-        self.fail_write = fail_write
-        self.receipt = receipt or FakeReceipt()
-        self.secrets: list[str] = []
-
-    def write_new(self, secret: str) -> FakeReceipt:
-        if self.fail_write:
-            raise OSError("credential path details must not leak")
-        self.secrets.append(secret)
-        return self.receipt
 
 
 class CapturedResponses:
@@ -324,87 +278,21 @@ def test_uow_rejects_concurrent_reuse_while_first_operation_is_active():
     asyncio.run(run_both())
 
 
-def test_issue_to_file_rolls_back_write_failure_and_sql_commit_failure(tmp_path):
-    command = IssueApiTokenCommand("developer", "demo")
-    session = FakeSession()
-    unit = SqlAlchemyUnitOfWork(cast(AsyncSession, session))
-    inner = FakeInnerIssue()
-    failing_delivery = FakeDelivery(fail_write=True)
-    with pytest.raises(OSError):
-        asyncio.run(IssueApiTokenToFile(inner, unit).execute(command, failing_delivery))
-    assert session.events == ["begin", "rollback", "close"]
-    assert failing_delivery.secrets == []
-
+def test_uow_rolls_back_token_operation_when_sql_commit_fails():
     session = FakeSession(fail_commit=SQLAlchemyError("database detail"))
     unit = SqlAlchemyUnitOfWork(cast(AsyncSession, session))
-    inner = FakeInnerIssue()
-    output = tmp_path / "sql-commit-failure"
+    writes = []
+
+    async def issue_token():
+        writes.append("token")
+        return TOKEN
+
     with pytest.raises(IdentityUnavailable) as caught:
-        asyncio.run(
-            IssueApiTokenToFile(inner, unit).execute(
-                command,
-                PrivateCredentialFile(output),
-            )
-        )
-    assert not output.exists()
+        asyncio.run(unit.run(issue_token, lambda value: value))
     assert caught.value.__cause__.__class__ is DatabaseUnavailable
     assert "database detail" not in str(caught.value)
+    assert writes == ["token"]
     assert session.events == ["begin", "commit", "rollback", "close"]
-
-
-def test_issue_to_file_preserves_replacement_and_cleanup_failure_note(tmp_path):
-    command = IssueApiTokenCommand("developer", "demo")
-    output = tmp_path / "replacement"
-    delivery = PrivateCredentialFile(output)
-    session = FakeSession(fail_commit=RuntimeError("commit failed"))
-    unit = SqlAlchemyUnitOfWork(cast(AsyncSession, session))
-
-    # Delivery receipt ownership is separately characterized by the identity tests;
-    # the outer operation must leave a replacement in place during compensation.
-    class ReplacingDelivery:
-        def write_new(self, secret):
-            receipt = delivery.write_new(secret)
-            output.unlink()
-            output.write_text("owned by another write")
-            return receipt
-
-    with pytest.raises(RuntimeError, match="commit failed"):
-        asyncio.run(
-            IssueApiTokenToFile(FakeInnerIssue(), unit).execute(command, ReplacingDelivery())
-        )
-    assert output.read_text() == "owned by another write"
-
-    receipt = FakeReceipt(fail_cleanup=True)
-    session = FakeSession(fail_commit=RuntimeError("primary commit failure"))
-    unit = SqlAlchemyUnitOfWork(cast(AsyncSession, session))
-    with pytest.raises(RuntimeError, match="primary commit failure") as caught:
-        asyncio.run(
-            IssueApiTokenToFile(FakeInnerIssue(), unit).execute(
-                command, FakeDelivery(receipt=receipt)
-            )
-        )
-    assert receipt.removed
-    assert caught.value.__notes__ == [
-        "Credential cleanup failed; the original failure was preserved."
-    ]
-    assert "private path" not in " ".join(caught.value.__notes__)
-
-
-def test_issue_to_file_keeps_credential_after_commit_then_close_failure(tmp_path):
-    output = tmp_path / "committed-credential"
-    session = FakeSession(fail_close=RuntimeError("close failed after commit"))
-    unit = SqlAlchemyUnitOfWork(cast(AsyncSession, session))
-
-    with pytest.raises(RuntimeError, match="close failed after commit"):
-        asyncio.run(
-            IssueApiTokenToFile(FakeInnerIssue(), unit).execute(
-                IssueApiTokenCommand("developer", "demo"),
-                PrivateCredentialFile(output),
-            )
-        )
-    assert output.read_text() == TOKEN + "\n"
-    assert output.stat().st_mode & 0o777 == 0o600
-    assert unit.committed is True
 
 
 @pytest.mark.parametrize("scope_kind", ["same", "concurrent"])

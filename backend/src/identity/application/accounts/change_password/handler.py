@@ -1,24 +1,18 @@
 """Password change validation and hashing policy."""
 
 import asyncio
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 from identity.application.accounts.change_password.command import ChangePasswordCommand
-from identity.application.authentication.authenticate_session.handler import authenticate_session
-from identity.application.interfaces.browser_transactions import BrowserTransaction
+from identity.application.interfaces.dispatch import ActionPrecondition
+from identity.application.interfaces.identity_transactions import IdentityTransaction
 from identity.application.interfaces.security import PasswordHasher
-from identity.application.shared.session_security import (
-    BrowserMutationAuthorizer,
-    DigestSecret,
-    require_browser_origin,
-)
-from identity.domain.browser_credentials import validate_password
-from identity.domain.browser_errors import BrowserAuthenticationRejected
 from identity.domain.interfaces.session_repository import SessionRepository
 from identity.domain.interfaces.user_repository import UserRepository
-from identity.domain.records import AccountCredentials, SessionPrincipal
+from identity.domain.password_policy import validate_password
+from identity.domain.records import AccountCredentials
+from identity.domain.session_errors import SessionAuthenticationRejected
 
 
 @dataclass(frozen=True)
@@ -38,7 +32,7 @@ async def verify_password_change(
         current_password,
         account.password_hash if account is not None else "",
     ):
-        raise BrowserAuthenticationRejected()
+        raise SessionAuthenticationRejected()
     validate_password(new_password)
     return PreparedPasswordChange(
         account.credential_version,
@@ -49,47 +43,37 @@ async def verify_password_change(
 class ChangePasswordHandler:
     def __init__(
         self,
-        transaction: BrowserTransaction,
+        transaction: IdentityTransaction,
         passwords: PasswordHasher,
-        clock: Callable[[], datetime],
-        digest_secret: DigestSecret,
-        allowed_origins: tuple[str, ...],
     ) -> None:
         self.transaction = transaction
         self.passwords = passwords
-        self.clock = clock
-        self.digest_secret = digest_secret
-        self.allowed_origins = allowed_origins
 
-    async def execute(self, command: ChangePasswordCommand) -> None:
-        require_browser_origin(command.origin, self.allowed_origins)
+    async def execute(
+        self, command: ChangePasswordCommand, precondition: ActionPrecondition
+    ) -> None:
+        async def load_account(users: UserRepository, _sessions: SessionRepository):
+            return await users.find_login_account(command.actor_name)
 
-        async def load_account(
-            users: UserRepository,
-            sessions: SessionRepository,
-        ) -> tuple[SessionPrincipal, AccountCredentials | None]:
-            principal = await authenticate_session(
-                sessions, self.clock, self.digest_secret, command.session_token
-            )
-            return principal, await users.find_login_account(principal.user_name)
-
-        principal, account = await self.transaction.run(load_account)
+        account = await self.transaction.run(load_account)
+        if account is None or account.user_id != command.actor_id:
+            raise SessionAuthenticationRejected()
         prepared = await verify_password_change(
             self.passwords, account, command.current_password, command.new_password
         )
 
         async def update_password(users: UserRepository, sessions: SessionRepository) -> None:
-            now = self.clock()
-            await BrowserMutationAuthorizer(
-                sessions, self.clock, self.digest_secret, self.allowed_origins
-            ).authorize_mutation(command.session_token, command.csrf_token, command.origin)
+            now = datetime.now(UTC)
+            current = await precondition(sessions, None)
+            if current.user_id != command.actor_id:
+                raise SessionAuthenticationRejected()
             if not await users.change_password(
-                user_id=principal.user_id,
+                user_id=command.actor_id,
                 expected_version=prepared.credential_version,
                 password_hash=prepared.encoded_password,
                 now=now,
             ):
-                raise BrowserAuthenticationRejected()
-            await sessions.revoke_user_sessions(principal.user_id, now)
+                raise SessionAuthenticationRejected()
+            await sessions.revoke_user_sessions(command.actor_id, now)
 
         await self.transaction.run(update_password)

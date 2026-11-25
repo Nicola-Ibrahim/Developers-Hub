@@ -37,13 +37,6 @@ async def project_memberships(
     return tuple((project_id, name, role) for project_id, name, role in rows)
 
 
-async def lock_named_project(session: AsyncSession, name: str) -> UUID | None:
-    project_id: UUID | None = await session.scalar(
-        select(ProjectRow.id).where(ProjectRow.name == name).with_for_update()
-    )
-    return project_id
-
-
 async def project_membership_role(
     session: AsyncSession, user_id: UUID, project_id: UUID
 ) -> str | None:

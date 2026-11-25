@@ -19,10 +19,10 @@ from identity.application.api_tokens.authenticate_api_token.handler import (
     AuthenticateApiTokenHandler,
 )
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
-from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
 from identity.application.interfaces.dispatch import IdentityModule
+from identity.application.interfaces.session_tokens import SessionTokenVerifier
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
-from identity.infra.security.tokens import token_digest
+from identity.infra.security.opaque_secrets import token_digest
 from shared.application.interfaces.readiness import ReadinessProbe
 from shared.infra.settings import Settings
 
@@ -256,7 +256,7 @@ def test_http_transport_works_with_fake_application_ports():
     class FakeIdentityQuery:
         async def query(self, message):
             assert isinstance(message, AuthenticateApiTokenQuery)
-            return await AuthenticateApiTokenHandler(Transaction(), Hasher(), lambda: now).execute(
+            return await AuthenticateApiTokenHandler(Transaction(), Hasher()).execute(
                 AuthenticateApiTokenQuery(message.token)
             )
 
@@ -279,7 +279,7 @@ def test_http_transport_works_with_fake_application_ports():
             return Ready()
 
         @provide(scope=Scope.APP)
-        def session_tokens(self) -> BrowserSessionTokenVerifier:
+        def session_tokens(self) -> SessionTokenVerifier:
             return RejectBrowserSessionTokens()
 
     container = make_async_container(FakeCapabilities(), FastapiProvider())

@@ -1,4 +1,5 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from uuid import UUID
 
 from identity.domain.records import AccountProfile
 from shared.dispatch import Command
@@ -6,7 +7,5 @@ from shared.dispatch import Command
 
 @dataclass(frozen=True, slots=True)
 class UpdateProfileCommand(Command[AccountProfile]):
-    session_token: str = field(repr=False)
+    actor_id: UUID
     display_name: str | None
-    csrf_token: str = field(repr=False)
-    origin: str | None

@@ -6,13 +6,6 @@ from uuid import UUID
 
 
 @dataclass(frozen=True)
-class ProjectMembershipStatus:
-    user_id: UUID
-    project_id: UUID
-    user_active: bool
-
-
-@dataclass(frozen=True)
 class ApiTokenStatus:
     token_id: UUID
     user_id: UUID
@@ -53,7 +46,6 @@ class AccountCredentials:
     password_hash: str = field(repr=False)
     credential_version: int
     active: bool
-    memberships: tuple[MembershipDetails, ...]
 
 
 @dataclass(frozen=True)

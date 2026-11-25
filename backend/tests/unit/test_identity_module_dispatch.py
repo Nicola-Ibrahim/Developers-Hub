@@ -227,7 +227,6 @@ def test_bearer_query_uses_its_own_transaction_and_leaves_platform_unit_unused()
     operation = AuthenticateApiTokenHandler(
         SqlAlchemyApiTokenTransaction(lambda: Session(), lambda active: Repository(active)),
         Hasher(),
-        lambda: now,
     )
 
     async def run() -> None:

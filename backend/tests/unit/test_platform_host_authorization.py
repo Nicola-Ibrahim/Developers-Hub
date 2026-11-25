@@ -71,7 +71,7 @@ def test_http_host_rechecks_trusted_access_and_rolls_back_denial(monkeypatch) ->
     monkeypatch.setattr("api.platform.module.authenticate_platform_access", authenticate)
     request = Request({"type": "http", "method": "GET", "path": "/"})
     request.state.request_identity = "private-token"
-    host = PlatformRequestModule(Container(), request, object(), lambda: None)
+    host = PlatformRequestModule(Container(), request, object())
 
     with pytest.raises(CatalogForbidden):
         asyncio.run(host.query(ReadResource(forged, uuid4())))
@@ -125,7 +125,7 @@ def test_http_host_dispatches_with_authenticated_actor_not_message_claims(monkey
     monkeypatch.setattr("api.platform.module.authenticate_platform_access", authenticate)
     request = Request({"type": "http", "method": "GET", "path": "/"})
     request.state.request_identity = "private-token"
-    host = PlatformRequestModule(Container(), request, object(), lambda: None)
+    host = PlatformRequestModule(Container(), request, object())
 
     assert asyncio.run(host.query(ReadResource(forged, uuid4()))) == trusted
     assert events == ["authenticate", "dispatch", "commit"]

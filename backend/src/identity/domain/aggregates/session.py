@@ -1,4 +1,4 @@
-"""Browser session entity without raw session or CSRF secrets."""
+"""Session entity without raw session or CSRF secrets."""
 
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta

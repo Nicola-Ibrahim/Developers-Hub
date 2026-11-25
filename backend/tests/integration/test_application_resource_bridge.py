@@ -59,10 +59,9 @@ async def _wait_until_binding_is_lock_blocked(database: AsyncEngine, application
     raise AssertionError("binding resolver never waited on the held application row lock")
 
 
-def test_binding_samples_resource_lease_after_application_lock(postgres_engine, tmp_path):
+def test_binding_samples_resource_lease_after_application_lock(postgres_engine):
     _, token = issue(
         postgres_engine,
-        tmp_path / "binding-lease-credential",
         project=f"binding-lease-{uuid4().hex}",
     )
     with client_for(postgres_engine) as client:
@@ -177,9 +176,9 @@ def test_binding_samples_resource_lease_after_application_lock(postgres_engine, 
 
 
 def test_attachment_replays_and_cleanup_keeps_reservation_until_worker_confirms(
-    postgres_engine, tmp_path
+    postgres_engine,
 ):
-    _, token = issue(postgres_engine, tmp_path / "credential")
+    _, token = issue(postgres_engine)
     with client_for(postgres_engine) as client:
         project = client.get(
             "/api/v1/projects", headers={"Authorization": "Bearer " + token}

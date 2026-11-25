@@ -10,6 +10,8 @@ from dishka.integrations.fastapi import FastapiProvider
 from fastapi.testclient import TestClient
 
 from api.app import create_app
+from api.identity.authentication import routes as login_routes
+from api.identity.authentication.login_rate_limit import LoginRequestRateLimiter
 from api.settings.config import BrowserCookiePolicy
 from identity.application.api_tokens.personal_token_messages import CreatePersonalTokenCommand
 from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
@@ -21,10 +23,11 @@ from identity.application.interfaces.authorization import (
     AuthorizationDecisionPort,
     AuthorizationUnavailable,
 )
-from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
 from identity.application.interfaces.dispatch import IdentityModule
+from identity.application.interfaces.session_tokens import SessionTokenVerifier
+from identity.application.interfaces.security import TokenHasher
 from identity.domain.records import PersonalApiToken, SessionPrincipal
-from identity.infra.security.browser_tokens import JwtBrowserSessionTokens
+from identity.infra.security.jwt import JwtSessionTokens
 
 USER, PROJECT, SESSION = uuid4(), uuid4(), uuid4()
 
@@ -38,7 +41,15 @@ class Identity:
         self.queries.append(query)
         assert isinstance(query, AuthenticateSessionQuery)
         return SessionPrincipal(
-            USER, "alice", SESSION, query.project_id, "project", "admin", (), (), "csrf"
+            USER,
+            "alice",
+            SESSION,
+            query.project_id or PROJECT,
+            "project",
+            "admin",
+            (),
+            (),
+            "csrf",
         )
 
     async def execute(self, command):
@@ -59,6 +70,25 @@ class Identity:
         return LoginResult(
             "private-session", "csrf", principal, datetime.now(UTC) + timedelta(hours=8)
         )
+
+    async def execute_with_precondition(self, command, precondition):
+        principal = SessionPrincipal(
+            USER, "alice", SESSION, PROJECT, "project", "admin", (), (), "csrf"
+        )
+
+        class Sessions:
+            async def authorize_session_operation(self, *_args, **_kwargs):
+                return principal
+
+            async def validate_csrf(self, *_args):
+                return True
+
+        class Tokens:
+            async def lock_personal_token(self, _token_id):
+                return None
+
+        await precondition(Sessions(), Tokens())
+        return await self.execute(command)
 
 
 class Policy:
@@ -99,8 +129,16 @@ class Bindings(Provider):
         return BrowserCookiePolicy(False)
 
     @provide(scope=Scope.APP)
-    def session_tokens(self) -> BrowserSessionTokenVerifier:
+    def session_tokens(self) -> SessionTokenVerifier:
         return self.session_token_verifier
+
+    @provide(scope=Scope.APP)
+    def token_hasher(self) -> TokenHasher:
+        class Hasher:
+            def digest(self, token: str) -> str:
+                return token
+
+        return Hasher()
 
 
 CASES = [
@@ -156,7 +194,15 @@ def test_policy_denial_blocks_every_protected_identity_action(
     try:
         with TestClient(create_app(container=container)) as client:
             client.cookies.set("devops_session", "private-session")
-            response = client.request(method, path, json=body, headers={"X-CSRF-Token": "csrf"})
+            response = client.request(
+                method,
+                path,
+                json=body,
+                headers={
+                    "X-CSRF-Token": "csrf",
+                    "Origin": "http://localhost:3000",
+                },
+            )
         assert response.status_code == (503 if unavailable else 403)
         assert not identity.commands
         assert len(identity.queries) == 1
@@ -180,12 +226,42 @@ def test_login_is_available_when_policy_service_is_unavailable():
     try:
         with TestClient(create_app(container=container)) as client:
             response = client.post(
-                "/api/v1/auth/login", json={"userName": "alice", "password": "password"}
+                "/api/v1/auth/login",
+                json={"userName": "alice", "password": "password"},
+                headers={"Origin": "http://localhost:3000"},
             )
         assert response.status_code == 200
         assert len(identity.commands) == 1
         assert not policy.calls
         assert "HttpOnly" in response.headers["set-cookie"]
+    finally:
+        asyncio.run(container.close())
+
+
+def test_login_request_limit_uses_direct_peer_and_ignores_forwarded_headers(monkeypatch):
+    identity, policy = Identity(), Policy(True)
+    container = make_async_container(Bindings(identity, policy), FastapiProvider())
+    monkeypatch.setattr(
+        login_routes, "login_request_rate_limiter", LoginRequestRateLimiter(max_requests=1)
+    )
+    try:
+        with TestClient(create_app(container=container)) as client:
+            payload = {"userName": "alice", "password": "password"}
+            first = client.post(
+                "/api/v1/auth/login",
+                json=payload,
+                headers={"X-Forwarded-For": "198.51.100.1", "Origin": "http://localhost:3000"},
+            )
+            limited = client.post(
+                "/api/v1/auth/login",
+                json=payload,
+                headers={"X-Forwarded-For": "203.0.113.2", "Origin": "http://localhost:3000"},
+            )
+        assert first.status_code == 200
+        assert limited.status_code == 429
+        assert limited.json()["code"] == "login_rate_limited"
+        assert len(identity.commands) == 1
+        assert not policy.calls
     finally:
         asyncio.run(container.close())
 
@@ -196,7 +272,10 @@ def test_allowed_logout_dispatches_after_policy_check():
     try:
         with TestClient(create_app(container=container)) as client:
             client.cookies.set("devops_session", "private-session")
-            response = client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": "csrf"})
+            response = client.post(
+                "/api/v1/auth/logout",
+                headers={"X-CSRF-Token": "csrf", "Origin": "http://localhost:3000"},
+            )
         assert response.status_code == 204
         assert len(identity.commands) == 1
         assert isinstance(identity.commands[0], LogoutCommand)
@@ -230,12 +309,15 @@ def test_personal_token_route_runs_router_policy_preflight_then_dispatches_messa
 @pytest.mark.parametrize("cookie", ["malformed.cookie.value", "a.b.c"])
 def test_malformed_browser_cookie_is_rejected_before_identity_or_policy(cookie):
     identity, policy = Identity(), Policy(allowed=True)
-    verifier = JwtBrowserSessionTokens("test-signing-material-" * 3)
+    verifier = JwtSessionTokens("test-signing-material-" * 3)
     container = make_async_container(Bindings(identity, policy, verifier), FastapiProvider())
     try:
         with TestClient(create_app(container=container)) as client:
             client.cookies.set("devops_session", cookie)
-            response = client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": "csrf"})
+            response = client.post(
+                "/api/v1/auth/logout",
+                headers={"X-CSRF-Token": "csrf", "Origin": "http://localhost:3000"},
+            )
         assert response.status_code == 401
         assert not identity.commands
         assert not identity.queries

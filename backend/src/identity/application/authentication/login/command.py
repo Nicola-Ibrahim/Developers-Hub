@@ -10,4 +10,3 @@ class LoginCommand(Command[LoginResult]):
     user_name: str
     password: str = field(repr=False)
     project_id: UUID | None
-    origin: str | None

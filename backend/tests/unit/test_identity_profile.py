@@ -1,13 +1,16 @@
 import asyncio
-from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
-from identity.application.profile.handlers import ProfileHandler, SecurityHistoryHandler
+from identity.application.profile.handlers import (
+    ReadProfileHandler,
+    SecurityHistoryHandler,
+    UpdateProfileHandler,
+)
 from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery
 from identity.application.profile.update_profile import UpdateProfileCommand
-from identity.domain.browser_errors import BrowserAuthenticationRejected
 from identity.domain.errors import IdentityValidationError
 from identity.domain.records import AccountProfile, SessionPrincipal
 
@@ -22,7 +25,7 @@ def test_profile_read_and_write_are_scoped_to_authenticated_user():
         async def authenticate_session(self, **_kwargs):
             return principal, None
 
-        async def authorize_browser_operation(self, *_args, **_kwargs):
+        async def authorize_session_operation(self, *_args, **_kwargs):
             return principal
 
         async def validate_csrf(self, *_args):
@@ -40,15 +43,17 @@ def test_profile_read_and_write_are_scoped_to_authenticated_user():
             return AccountProfile(user_id, principal.user_name, display_name)
 
     users = Users()
-    handler = ProfileHandler(
-        users, Sessions(), lambda: datetime.now(UTC), lambda value: value, ("https://hub.test",)
+    handler = UpdateProfileHandler(users)
+    profile = asyncio.run(
+        ReadProfileHandler(users, Sessions(), SimpleNamespace(digest=str)).execute(
+            ProfileQuery("session")
+        )
     )
-    profile = asyncio.run(handler.execute(ProfileQuery("session")))
     updated = asyncio.run(
-        handler.execute(UpdateProfileCommand("session", "Alice", "csrf", "https://hub.test"))
+        handler.execute(UpdateProfileCommand(user_id, "Alice"))
     )
     cleared = asyncio.run(
-        handler.execute(UpdateProfileCommand("session", None, "csrf", "https://hub.test"))
+        handler.execute(UpdateProfileCommand(user_id, None))
     )
 
     assert profile.user_id == updated.user_id == user_id
@@ -61,13 +66,9 @@ def test_profile_read_and_write_are_scoped_to_authenticated_user():
 
 @pytest.mark.parametrize("display_name", ["", "   ", "x" * 101])
 def test_profile_validation_rejects_invalid_display_name_before_persistence(display_name):
-    class NeverCalled:
-        async def authenticate_session(self, **_kwargs):
-            raise AssertionError("invalid values should fail before lookup")
-
-    handler = ProfileHandler(object(), NeverCalled(), lambda: datetime.now(UTC), str, ())
+    handler = UpdateProfileHandler(object())
     with pytest.raises(IdentityValidationError):
-        asyncio.run(handler.execute(UpdateProfileCommand("session", display_name, "csrf", None)))
+        asyncio.run(handler.execute(UpdateProfileCommand(uuid4(), display_name)))
 
 
 def test_security_history_query_uses_only_authenticated_subject_and_is_bounded():
@@ -86,28 +87,17 @@ def test_security_history_query_uses_only_authenticated_subject_and_is_bounded()
             return ()
 
     users = Users()
-    handler = SecurityHistoryHandler(users, Sessions(), lambda: datetime.now(UTC), str)
+    handler = SecurityHistoryHandler(users, Sessions(), SimpleNamespace(digest=str))
     asyncio.run(handler.execute(SecurityHistoryQuery("session")))
     assert users.requested == (user_id, 100)
 
 
-def test_profile_mutation_rejects_invalid_origin_and_csrf():
-    principal = SessionPrincipal(uuid4(), "alice", uuid4(), None, None, None, (), (), "csrf")
+def test_profile_write_uses_router_authorized_actor():
+    user_id = uuid4()
 
-    class Sessions:
-        async def authenticate_session(self, **_kwargs):
-            return principal, None
+    class Users:
+        async def update_profile(self, *, user_id: object, display_name: str, now: object):
+            return AccountProfile(user_id, "alice", display_name)
 
-        async def authorize_browser_operation(self, *_args, **_kwargs):
-            return principal
-
-        async def validate_csrf(self, *_args):
-            return False
-
-    handler = ProfileHandler(
-        object(), Sessions(), lambda: datetime.now(UTC), str, ("https://hub.test",)
-    )
-    with pytest.raises(BrowserAuthenticationRejected):
-        asyncio.run(
-            handler.execute(UpdateProfileCommand("session", "Alice", "bad", "https://hub.test"))
-        )
+    result = asyncio.run(UpdateProfileHandler(Users()).execute(UpdateProfileCommand(user_id, "A")))
+    assert result.user_id == user_id

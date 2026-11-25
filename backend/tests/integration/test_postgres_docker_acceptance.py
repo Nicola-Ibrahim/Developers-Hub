@@ -38,7 +38,7 @@ pytestmark = pytest.mark.postgres
 
 
 @pytest.mark.parametrize("cleanup_reason", ["explicit", "expiry"])
-def test_request_connect_restart_extend_delete(postgres_engine, tmp_path, cleanup_reason):
+def test_request_connect_restart_extend_delete(postgres_engine, cleanup_reason):
     socket = os.environ.get("PLATFORM_TEST_DOCKER_URL")
     if not socket:
         pytest.skip("Set PLATFORM_TEST_DOCKER_URL to an isolated permitted local Docker socket")
@@ -54,10 +54,8 @@ def test_request_connect_restart_extend_delete(postgres_engine, tmp_path, cleanu
         local_provider_enabled=True,
         docker_url=socket,
     )
-    _, token = issue(postgres_engine, tmp_path / "credential")
-    _, foreign_token = issue(
-        postgres_engine, tmp_path / "foreign", user="foreign", project="foreign"
-    )
+    _, token = issue(postgres_engine)
+    _, foreign_token = issue(postgres_engine, user="foreign", project="foreign")
     with Session(postgres_engine) as session, session.begin():
         session.add(
             QuotaBudget(

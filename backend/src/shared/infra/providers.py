@@ -2,13 +2,11 @@
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from shared.application.interfaces.readiness import ReadinessProbe
-from shared.infra.clock import Clock
 from shared.infra.persistence.database import create_async_database_engine
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.readiness import SqlAlchemyReadinessProbe
@@ -53,9 +51,3 @@ class DatabaseProvider(Provider):
     @provide(scope=Scope.APP)
     def readiness(self, engine: AsyncEngine) -> ReadinessProbe:
         return SqlAlchemyReadinessProbe(engine, SCHEMA_REVISION)
-
-
-class RuntimeClockProvider(Provider):
-    @provide(scope=Scope.APP)
-    def clock(self) -> Clock:
-        return lambda: datetime.now(UTC)

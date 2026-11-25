@@ -1,8 +1,6 @@
 from typing import Protocol
 
 __all__ = [
-    "CredentialDelivery",
-    "CredentialReceipt",
     "PasswordHasher",
     "TokenGenerator",
     "TokenHasher",
@@ -16,16 +14,10 @@ class TokenHasher(Protocol):
 class PasswordHasher(Protocol):
     def hash(self, password: str) -> str: ...
 
-    def verify(self, password: str, encoded: str) -> bool: ...
+    def verify(self, password: str, encoded: str | None) -> bool: ...
+
+    def needs_rehash(self, encoded: str) -> bool: ...
 
 
 class TokenGenerator(Protocol):
     def generate(self) -> str: ...
-
-
-class CredentialReceipt(Protocol):
-    def remove_owned(self) -> None: ...
-
-
-class CredentialDelivery(Protocol):
-    def write_new(self, secret: str) -> CredentialReceipt: ...

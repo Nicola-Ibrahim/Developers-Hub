@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -18,6 +19,9 @@ from devops_platform.application.shared.dto import AccessContext
 from devops_platform.domain.errors import InvalidProjectRole
 from identity.application.accounts.create_user.command import CreateUserCommand
 from identity.application.accounts.create_user.handler import CreateUserHandler
+from identity.application.authentication.authenticate_session import (
+    handler as authenticate_session_module,
+)
 from identity.application.authentication.authenticate_session.handler import (
     AuthenticateSessionHandler,
 )
@@ -51,7 +55,7 @@ def test_create_internal_user_handler_builds_normalized_domain_name() -> None:
 
     repository = Repository()
     asyncio.run(
-        CreateUserHandler(Transaction(repository), Passwords(), lambda: NOW).execute(
+        CreateUserHandler(Transaction(repository), Passwords()).execute(
             CreateUserCommand(" Developer ", "long-enough-password")
         )
     )
@@ -101,7 +105,7 @@ def test_project_member_query_is_read_only_and_receives_authorized_actor() -> No
     assert repository.values == (actor_id, project_id)
 
 
-def test_session_refresh_is_explicitly_a_command() -> None:
+def test_session_refresh_is_explicitly_a_command(monkeypatch) -> None:
     user_id, session_id = uuid4(), uuid4()
     principal = SessionPrincipal(user_id, "dev", session_id, None, None, None, (), (), "")
 
@@ -111,9 +115,17 @@ def test_session_refresh_is_explicitly_a_command() -> None:
             return principal, "encoded-token"
 
     repository = Repository()
+
+    class FixedDateTime:
+        @staticmethod
+        def now(tz=None):
+            assert tz is UTC
+            return NOW
+
+    monkeypatch.setattr(authenticate_session_module, "datetime", FixedDateTime)
     result = asyncio.run(
         AuthenticateSessionHandler(
-            repository, lambda: NOW, lambda value: f"digest:{value}"
+            repository, SimpleNamespace(digest=lambda value: f"digest:{value}")
         ).execute(AuthenticateSessionQuery("private-session"))
     )
 

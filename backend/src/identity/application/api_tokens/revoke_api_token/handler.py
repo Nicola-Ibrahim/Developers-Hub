@@ -1,5 +1,4 @@
-from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 
 from identity.application.api_tokens.revoke_api_token.command import RevokeApiTokenCommand
 from identity.application.interfaces.token_operations import ApiTokenTransaction
@@ -8,9 +7,8 @@ from identity.domain.records import ApiTokenAuditEvent
 
 
 class RevokeApiTokenHandler:
-    def __init__(self, transaction: ApiTokenTransaction, clock: Callable[[], datetime]) -> None:
+    def __init__(self, transaction: ApiTokenTransaction) -> None:
         self.transaction = transaction
-        self.clock = clock
 
     async def execute(self, command: RevokeApiTokenCommand) -> bool:
         return await self.transaction.run(lambda repository: self._revoke(repository, command))
@@ -21,7 +19,7 @@ class RevokeApiTokenHandler:
         if token is None:
             return False
         if token.revoked_at is None:
-            revoked_at = self.clock()
+            revoked_at = datetime.now(UTC)
             await repository.revoke_api_token(token_id, revoked_at)
             await repository.record_token_audit(
                 ApiTokenAuditEvent(

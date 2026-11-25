@@ -15,10 +15,8 @@ from identity.domain.records import (
     ApiTokenAuditEvent,
     ApiTokenStatus,
     PersonalApiToken,
-    ProjectMembershipStatus,
 )
 from identity.infra.persistence.models.api_token import ApiAccessTokenRow
-from identity.infra.persistence.models.user import InternalUserRow
 from shared.infra.persistence.audit import AuditEvent
 
 
@@ -41,58 +39,6 @@ class SQLAlchemyApiTokenRepository:
             if token is None:
                 return None
             return await self._project_access.find_token_credential(digest)
-        except SQLAlchemyError as exc:
-            raise IdentityUnavailable() from exc
-
-    async def require_project_membership(
-        self, *, user_name: str, project_name: str
-    ) -> ProjectMembershipStatus:
-        try:
-            project_id = await self._project_access.lock_named_project(project_name)
-            if project_id is None:
-                raise IdentityValidationError("Project and current membership are required")
-            user = await self._session.scalar(
-                select(InternalUserRow).where(InternalUserRow.name == user_name).with_for_update()
-            )
-            if user is None:
-                raise IdentityValidationError(
-                    "Active account and current project membership are required"
-                )
-            if not await self._project_access.lock_project_membership(user.id, project_id):
-                raise IdentityValidationError(
-                    "Active account and current project membership are required"
-                )
-            return ProjectMembershipStatus(
-                user_id=user.id, project_id=project_id, user_active=user.active
-            )
-        except SQLAlchemyError as exc:
-            raise IdentityUnavailable() from exc
-
-    async def insert_api_token(
-        self,
-        *,
-        user_id: UUID,
-        project_id: UUID,
-        digest: str,
-        scopes: tuple[str, ...],
-        expires_at: datetime,
-        created_at: datetime,
-        name: str = "Legacy token",
-    ) -> UUID:
-        try:
-            token = ApiAccessTokenRow(
-                user_id=user_id,
-                project_id=project_id,
-                digest=digest,
-                name=name,
-                scopes=list(scopes),
-                created_at=created_at,
-                expires_at=expires_at,
-                revoked_at=None,
-            )
-            self._session.add(token)
-            await self._session.flush()
-            return token.id
         except SQLAlchemyError as exc:
             raise IdentityUnavailable() from exc
 

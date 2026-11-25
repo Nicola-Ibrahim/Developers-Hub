@@ -43,6 +43,7 @@ class UserRepository(Protocol):
         expected_version: int | None,
         accepted: bool,
         now: datetime,
+        replacement_password_hash: str | None = None,
     ) -> tuple[UUID, str, int] | None: ...
 
     async def load_session_account(

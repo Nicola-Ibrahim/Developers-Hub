@@ -1,4 +1,4 @@
-"""Browser session persistence operations."""
+"""Session persistence operations."""
 
 from datetime import datetime
 from typing import Protocol
@@ -28,7 +28,7 @@ class SessionRepository(Protocol):
         self, *, token_digest: str, project_id: UUID | None, now: datetime
     ) -> tuple[SessionPrincipal, str] | None: ...
 
-    async def authorize_browser_operation(
+    async def authorize_session_operation(
         self,
         token_digest: str,
         project_id: UUID | None,

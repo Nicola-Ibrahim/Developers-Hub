@@ -14,11 +14,10 @@ from identity.domain.records import (
     AccountCredentials,
     AccountProfile,
     AccountSessionDetails,
-    MembershipDetails,
     SecurityActivity,
 )
 from identity.infra.persistence.models.activity import IdentityActivityRow
-from identity.infra.persistence.models.session import BrowserLoginThrottleRow
+from identity.infra.persistence.models.session import LoginThrottleRow
 from identity.infra.persistence.models.user import InternalUserRow, PasswordSetupRow
 from shared.infra.persistence.audit import AuditEvent
 
@@ -84,10 +83,6 @@ class SQLAlchemyUserRepository(UserRepository):
         activities.sort(key=lambda item: (item.created_at, item.id.hex), reverse=True)
         return tuple(activities[:limit])
 
-    async def _memberships(self, user_id: UUID) -> tuple[MembershipDetails, ...]:
-        rows = await self._project_access.project_memberships(user_id)
-        return tuple(MembershipDetails(project_id, name, role) for project_id, name, role in rows)
-
     async def find_login_account(self, user_name: str) -> AccountCredentials | None:
         user = await self._session.scalar(
             select(InternalUserRow).where(InternalUserRow.name == user_name)
@@ -100,7 +95,6 @@ class SQLAlchemyUserRepository(UserRepository):
             password_hash=user.password_hash,
             credential_version=user.credential_version,
             active=user.active,
-            memberships=await self._memberships(user.id),
         )
 
     async def record_login_attempt(
@@ -111,6 +105,7 @@ class SQLAlchemyUserRepository(UserRepository):
         expected_version: int | None,
         accepted: bool,
         now: datetime,
+        replacement_password_hash: str | None = None,
     ) -> tuple[UUID, str, int] | None:
         user = await self._session.scalar(
             select(InternalUserRow).where(InternalUserRow.name == user_name).with_for_update()
@@ -118,13 +113,13 @@ class SQLAlchemyUserRepository(UserRepository):
         if user is None:
             return None
         await self._session.execute(
-            insert(BrowserLoginThrottleRow)
+            insert(LoginThrottleRow)
             .values(username_digest=username_digest, failures=0, window_started_at=now)
-            .on_conflict_do_nothing(index_elements=[BrowserLoginThrottleRow.username_digest])
+            .on_conflict_do_nothing(index_elements=[LoginThrottleRow.username_digest])
         )
         throttle = await self._session.scalar(
-            select(BrowserLoginThrottleRow)
-            .where(BrowserLoginThrottleRow.username_digest == username_digest)
+            select(LoginThrottleRow)
+            .where(LoginThrottleRow.username_digest == username_digest)
             .with_for_update()
         )
         assert throttle is not None
@@ -142,6 +137,8 @@ class SQLAlchemyUserRepository(UserRepository):
             return None
         if user.credential_version != expected_version:
             return None
+        if replacement_password_hash is not None:
+            user.password_hash = replacement_password_hash
         throttle.failures = 0
         throttle.window_started_at = now
         throttle.locked_until = None

@@ -1,5 +1,6 @@
 """Project membership administration endpoints."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Annotated, Literal, cast
 from uuid import UUID
@@ -7,7 +8,6 @@ from uuid import UUID
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Header, Request, Response
 
-from api.core.security.request_identity import BrowserRequestCredentials
 from api.identity.authentication.credentials import CSRF_HEADER, browser_credentials
 from api.platform.projects.schemas import MembershipBody
 from devops_platform.application.interfaces.module import DeveloperPlatformModule
@@ -27,13 +27,7 @@ async def project_access(project_id: UUID, request: Request) -> AccessContext:
         from api.core.errors import APIError
 
         raise APIError(401, "authentication_required", "Browser session is required")
-    identity = BrowserRequestCredentials(
-        credentials.session_token,
-        project_id,
-        request.headers.get(CSRF_HEADER),
-        request.headers.get("origin"),
-        request.method not in {"GET", "HEAD", "OPTIONS"},
-    )
+    identity = replace(credentials, project_id=project_id)
     request.state.request_identity = identity
     principal = cast(SessionPrincipal, request.state.identity_principal)
     if principal.role not in {"developer", "admin"}:

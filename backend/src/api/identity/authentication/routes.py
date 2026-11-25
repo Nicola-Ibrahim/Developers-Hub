@@ -5,12 +5,15 @@ from typing import Annotated
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Header, Request, Response
 
+from api.core.errors import APIError
 from api.identity.authentication.credentials import (
     CSRF_HEADER,
     SESSION_COOKIE,
     browser_credentials,
+    require_browser_origin,
     require_cookie_session,
 )
+from api.identity.authentication.login_rate_limit import login_request_rate_limiter
 from api.identity.authentication.schemas import LoginBody, ProjectBody
 from api.identity.sessions.mapping import _principal
 from api.settings.config import BrowserCookiePolicy
@@ -34,9 +37,12 @@ async def login(
     module: FromDishka[IdentityModule],
     cookie_policy: FromDishka[BrowserCookiePolicy],
 ) -> dict[str, object]:
-    result = await module.execute(
-        LoginCommand(body.user_name, body.password, body.project_id, request.headers.get("origin"))
-    )
+    require_browser_origin(request, cookie_policy.allowed_origins)
+    peer = request.client.host if request.client is not None else None
+    with login_request_rate_limiter.admit(peer) as allowed:
+        if not allowed:
+            raise APIError(429, "login_rate_limited", "Too many login requests. Try again later.")
+        result = await module.execute(LoginCommand(body.user_name, body.password, body.project_id))
     response.set_cookie(
         SESSION_COOKIE,
         result.session_token,

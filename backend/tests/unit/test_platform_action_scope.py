@@ -125,7 +125,6 @@ def _host(
         container,
         request,
         settings,
-        lambda: datetime.now(UTC),
     )
     return host, container
 

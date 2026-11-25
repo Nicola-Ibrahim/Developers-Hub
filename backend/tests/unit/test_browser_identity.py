@@ -20,18 +20,16 @@ from identity.application.authentication.login.handler import (
     LoginHandler,
 )
 from identity.application.shared.principal import principal_for_project
-from identity.application.shared.session_security import BrowserMutationAuthorizer
-from identity.domain.browser_credentials import validate_password
-from identity.domain.browser_errors import BrowserAuthenticationRejected
+from identity.application.shared.session_security import authorize_session_mutation
 from identity.domain.errors import IdentityValidationError
+from identity.domain.password_policy import validate_password
 from identity.domain.records import AccountCredentials, MembershipDetails
+from identity.domain.session_errors import SessionAuthenticationRejected
 from identity.domain.value_objects.session_expiry import SessionExpiry
 from identity.domain.value_objects.user_name import UserName
-from identity.infra.security.browser_tokens import JwtBrowserSessionTokens
-from identity.infra.security.login_verifier import (
-    LoginCredentialVerifier as InfraLoginCredentialVerifier,
-)
-from identity.infra.security.passwords import ScryptPasswordHasher
+from identity.infra.security.jwt import JwtSessionTokens
+from identity.infra.security.opaque_secrets import PepperedTokenHasher
+from identity.infra.security.passwords import Argon2idPasswordHasher
 
 
 def test_browser_mutation_checks_origin_before_locking_and_rejects_invalid_csrf():
@@ -39,7 +37,7 @@ def test_browser_mutation_checks_origin_before_locking_and_rejects_invalid_csrf(
     calls = []
 
     class Repository:
-        async def authorize_browser_operation(self, token, project, at, *, lock_for_mutation):
+        async def authorize_session_operation(self, token, project, at, *, lock_for_mutation):
             calls.append((token, project, at, lock_for_mutation))
             return object()
 
@@ -47,15 +45,23 @@ def test_browser_mutation_checks_origin_before_locking_and_rejects_invalid_csrf(
             calls.append((token, csrf))
             return False
 
-    authorizer = BrowserMutationAuthorizer(
-        Repository(), lambda: now, lambda secret: f"digest:{secret}", ("https://hub.test",)
-    )
-    with pytest.raises(BrowserAuthenticationRejected):
-        asyncio.run(authorizer.authorize_mutation("session", "csrf", "https://other.test"))
+    async def authorize(origin):
+        return await authorize_session_mutation(
+            Repository(),
+            lambda secret: f"digest:{secret}",
+            ("https://hub.test",),
+            "session",
+            "csrf",
+            origin,
+            now=now,
+        )
+
+    with pytest.raises(SessionAuthenticationRejected):
+        asyncio.run(authorize("https://other.test"))
     assert calls == []
 
-    with pytest.raises(BrowserAuthenticationRejected):
-        asyncio.run(authorizer.authorize_mutation("session", "csrf", "https://hub.test/"))
+    with pytest.raises(SessionAuthenticationRejected):
+        asyncio.run(authorize("https://hub.test/"))
     assert calls == [("digest:session", None, now, True), ("digest:session", "digest:csrf")]
 
 
@@ -75,12 +81,14 @@ def test_username_and_password_policy_is_normalized_and_bounded():
         validate_password("short")
 
 
-def test_scrypt_hash_verifies_only_matching_password_and_never_embeds_plaintext():
-    hasher = ScryptPasswordHasher()
+def test_argon2id_hash_verifies_only_matching_password_and_never_embeds_plaintext():
+    hasher = Argon2idPasswordHasher()
     encoded = hasher.hash("correct-horse-battery")
     assert "correct-horse-battery" not in encoded
     assert hasher.verify("correct-horse-battery", encoded)
     assert not hasher.verify("wrong-password", encoded)
+    assert not hasher.verify("wrong-password", None)
+    assert not hasher.needs_rehash(encoded)
 
 
 def test_browser_session_expiry_sets_idle_and_absolute_deadlines():
@@ -131,14 +139,14 @@ def test_browser_transport_parses_project_header_and_rejects_cookie_bearer_ambig
 
 @pytest.mark.parametrize("token", ["malformed.cookie.value", "a.b.c"])
 def test_browser_cookie_guard_rejects_malformed_jwt(token):
-    verifier = JwtBrowserSessionTokens("test-signing-material-" * 3)
+    verifier = JwtSessionTokens("test-signing-material-" * 3)
     with pytest.raises(APIError) as error:
         require_valid_browser_session(BrowserCredentials(token, None), verifier)
     assert error.value.status == 401
 
 
 def test_browser_cookie_guard_rejects_expired_jwt():
-    verifier = JwtBrowserSessionTokens("test-signing-material-" * 3)
+    verifier = JwtSessionTokens("test-signing-material-" * 3)
     now = datetime.now(UTC)
     token = verifier.issue("account", now - timedelta(minutes=2), now - timedelta(minutes=1))
     with pytest.raises(APIError) as error:
@@ -146,11 +154,15 @@ def test_browser_cookie_guard_rejects_expired_jwt():
     assert error.value.status == 401
 
 
-def test_browser_login_verifier_uses_dummy_hash_for_missing_user():
-    hasher = ScryptPasswordHasher()
-    verifier = InfraLoginCredentialVerifier(hasher)
-
-    assert not asyncio.run(verifier.verify("wrong-password", None))
+def test_password_adapter_keeps_legacy_scrypt_verification_and_requests_rehash():
+    hasher = Argon2idPasswordHasher()
+    salt = bytes(range(16))
+    value = __import__("hashlib").scrypt(
+        b"legacy-password", salt=salt, n=1 << 14, r=8, p=1, dklen=32
+    )
+    legacy = f"scrypt${1 << 14}$8$1${salt.hex()}${value.hex()}"
+    assert hasher.verify("legacy-password", legacy)
+    assert hasher.needs_rehash(legacy)
 
 
 def test_login_handler_commits_rejected_credentials_before_returning_rejection():
@@ -162,7 +174,7 @@ def test_login_handler_commits_rejected_credentials_before_returning_rejection()
             return None
 
         async def record_login_attempt(self, **values):
-            events.append(("complete", values["accepted"]))
+            events.append(("complete", values["accepted"], values["replacement_password_hash"]))
             return None
 
         async def select_project(self, **values):
@@ -178,31 +190,27 @@ def test_login_handler_commits_rejected_credentials_before_returning_rejection()
             events.append("transaction-commit")
             return result
 
-    class Verifier:
-        async def verify(self, password, encoded):
-            events.append(("verify", encoded))
-            return False
-
     class Tokens:
         def generate(self):
+            events.append("csrf-generated")
             return "opaque-secret"
 
     class SessionTokenIssuer:
         def issue(self, subject, issued_at, expires_at):
+            events.append("jwt-issued")
             return "session-jwt"
 
     handler = LoginHandler(
         Transaction(),
-        Verifier(),
+        Argon2idPasswordHasher(),
         Tokens(),
-        lambda: datetime.now(UTC),
-        lambda secret: f"digest:{secret}",
+        PepperedTokenHasher("synthetic-pepper-for-login-tests" * 2),
         ("https://hub.test",),
         SessionTokenIssuer(),
     )
 
     async def execute():
-        with pytest.raises(BrowserAuthenticationRejected):
+        with pytest.raises(SessionAuthenticationRejected):
             await handler.execute(LoginCommand(" Alice ", "wrong", None, "https://hub.test"))
 
     asyncio.run(execute())
@@ -210,15 +218,14 @@ def test_login_handler_commits_rejected_credentials_before_returning_rejection()
         "transaction-start",
         ("find", "alice"),
         "transaction-commit",
-        ("verify", None),
         "transaction-start",
-        ("complete", False),
+        ("complete", False, None),
         "transaction-commit",
     ]
 
 
 def test_password_change_checks_current_password_and_preserves_version_fence():
-    hasher = ScryptPasswordHasher()
+    hasher = Argon2idPasswordHasher()
     account = AccountCredentials(
         uuid4(), "alice", hasher.hash("current-password-value"), 7, True, ()
     )
@@ -231,7 +238,7 @@ def test_password_change_checks_current_password_and_preserves_version_fence():
         assert prepared.credential_version == 7
         assert hasher.verify("new-password-value", prepared.encoded_password)
         assert "new-password-value" not in repr(prepared)
-        with pytest.raises(BrowserAuthenticationRejected):
+        with pytest.raises(SessionAuthenticationRejected):
             await verify_password_change(
                 hasher, account, "incorrect-current-password", "another-new-password"
             )

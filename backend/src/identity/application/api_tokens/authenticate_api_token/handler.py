@@ -1,5 +1,4 @@
-from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
 from identity.application.interfaces.security import TokenHasher
@@ -11,16 +10,15 @@ from identity.domain.services.token_authentication import authenticate_api_token
 
 
 class AuthenticateApiTokenHandler:
-    def __init__(
-        self, transaction: ApiTokenTransaction, hasher: TokenHasher, clock: Callable[[], datetime]
-    ) -> None:
+    def __init__(self, transaction: ApiTokenTransaction, hasher: TokenHasher) -> None:
         self.transaction = transaction
         self.hasher = hasher
-        self.clock = clock
 
     async def execute(self, query: AuthenticateApiTokenQuery) -> AuthenticatedPrincipal:
         return await self.transaction.run(
-            lambda repository: authenticate_api_token(query, repository, self.hasher, self.clock)
+            lambda repository: authenticate_api_token(
+                query, repository, self.hasher, datetime.now(UTC)
+            )
         )
 
 
@@ -28,10 +26,10 @@ async def authenticate_api_token(
     query: AuthenticateApiTokenQuery,
     repository: ApiTokenRepository,
     hasher: TokenHasher,
-    clock: Callable[[], datetime],
+    now: datetime,
 ) -> AuthenticatedPrincipal:
     token = query.token
     if token is None or not 32 <= len(token) <= 256:
         raise AuthenticationRejected()
     snapshot = await repository.find_token_credential(hasher.digest(token))
-    return authenticate_api_token_credentials(snapshot, clock())
+    return authenticate_api_token_credentials(snapshot, now)

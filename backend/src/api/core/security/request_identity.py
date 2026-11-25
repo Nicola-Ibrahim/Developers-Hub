@@ -1,31 +1,19 @@
 """Private per-request credentials; never included in responses or logs."""
 
-from dataclasses import dataclass, field
 from typing import Annotated
-from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from api.identity.authentication.credentials import (
-    CSRF_HEADER,
+    BrowserCredentials,
     browser_credentials,
     require_valid_browser_session,
 )
-from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
+from identity.application.interfaces.session_tokens import SessionTokenVerifier
 
-
-@dataclass(frozen=True)
-class BrowserRequestCredentials:
-    session_token: str = field(repr=False)
-    project_id: UUID | None = None
-    csrf_token: str | None = field(default=None, repr=False)
-    origin: str | None = None
-    mutate: bool = False
-
-
-type RequestIdentity = str | BrowserRequestCredentials | None
+type RequestIdentity = str | BrowserCredentials | None
 bearer = HTTPBearer(auto_error=False)
 
 
@@ -33,18 +21,12 @@ bearer = HTTPBearer(auto_error=False)
 async def request_identity(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
-    session_tokens: FromDishka[BrowserSessionTokenVerifier],
+    session_tokens: FromDishka[SessionTokenVerifier],
 ) -> RequestIdentity:
     browser = browser_credentials(request)
     require_valid_browser_session(browser, session_tokens)
     if browser.session_token is not None:
-        identity: RequestIdentity = BrowserRequestCredentials(
-            browser.session_token,
-            browser.project_id,
-            request.headers.get(CSRF_HEADER),
-            request.headers.get("origin"),
-            request.method not in {"GET", "HEAD", "OPTIONS"},
-        )
+        identity: RequestIdentity = browser
     else:
         identity = credentials.credentials if credentials is not None else None
     request.state.request_identity = identity

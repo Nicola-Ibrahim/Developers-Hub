@@ -7,11 +7,10 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Header, Query, Request, Response
 from pydantic import BaseModel, Field
 
+from api.composition.identity_preconditions import browser_write_precondition, execute_browser_write
 from api.core.errors import APIError
 from api.identity.authentication.credentials import (
     CSRF_HEADER,
-    browser_credentials,
-    require_cookie_session,
 )
 from identity.application.api_tokens.personal_token_messages import (
     CreatePersonalTokenCommand,
@@ -20,6 +19,7 @@ from identity.application.api_tokens.personal_token_messages import (
     RotatePersonalTokenCommand,
 )
 from identity.application.interfaces.dispatch import IdentityModule
+from identity.application.interfaces.security import TokenHasher
 from identity.domain.records import PersonalApiToken
 
 router = APIRouter()
@@ -51,7 +51,7 @@ async def list_tokens(
     project_id: Annotated[UUID | None, Query(alias="projectId")] = None,
 ) -> list[dict[str, object]]:
     query = ListPersonalTokensQuery(
-        require_cookie_session(browser_credentials(request)), project_id
+        request.state.identity_principal.user_id, project_id
     )
     items = await module.query(query)
     response.headers["Cache-Control"] = "no-store"
@@ -64,18 +64,24 @@ async def create_token(
     body: CreateTokenBody,
     request: Request,
     response: Response,
+    _csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
     module: FromDishka[IdentityModule],
-    csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
+    hasher: FromDishka[TokenHasher],
 ) -> dict[str, object]:
-    result = await module.execute(
-        CreatePersonalTokenCommand(
-            require_cookie_session(browser_credentials(request)),
-            csrf_token,
-            request.headers.get("origin"),
-            body.name,
-            tuple(body.scopes),
-            body.hours,
-        )
+    actor = request.state.identity_principal
+    command = CreatePersonalTokenCommand(
+        actor.user_id, actor.project_id, body.name, tuple(body.scopes), body.hours
+    )
+    result = await execute_browser_write(
+        module,
+        command,
+        browser_write_precondition(
+            request,
+            actor.user_id,
+            hasher,
+            expected_project_id=actor.project_id,
+            check_project=True,
+        ),
     )
     item, secret = result
     response.headers["Cache-Control"] = "no-store"
@@ -88,16 +94,16 @@ async def rotate_token(
     token_id: UUID,
     request: Request,
     response: Response,
+    _csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
     module: FromDishka[IdentityModule],
-    csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
+    hasher: FromDishka[TokenHasher],
 ) -> dict[str, object]:
-    result = await module.execute(
-        RotatePersonalTokenCommand(
-            require_cookie_session(browser_credentials(request)),
-            csrf_token,
-            request.headers.get("origin"),
-            token_id,
-        )
+    actor_id = request.state.identity_principal.user_id
+    command = RotatePersonalTokenCommand(actor_id, token_id)
+    result = await execute_browser_write(
+        module,
+        command,
+        browser_write_precondition(request, actor_id, hasher, token_id=token_id),
     )
     if result is None:
         raise APIError(404, "not_found", "Token not found")
@@ -112,16 +118,16 @@ async def revoke_token(
     token_id: UUID,
     request: Request,
     response: Response,
+    _csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
     module: FromDishka[IdentityModule],
-    csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
+    hasher: FromDishka[TokenHasher],
 ) -> Response:
-    revoked = await module.execute(
-        RevokePersonalTokenCommand(
-            require_cookie_session(browser_credentials(request)),
-            csrf_token,
-            request.headers.get("origin"),
-            token_id,
-        )
+    actor_id = request.state.identity_principal.user_id
+    command = RevokePersonalTokenCommand(actor_id, token_id)
+    revoked = await execute_browser_write(
+        module,
+        command,
+        browser_write_precondition(request, actor_id, hasher, token_id=token_id),
     )
     if not revoked:
         raise APIError(404, "not_found", "Token not found")

@@ -2,22 +2,47 @@
 
 import hashlib
 import hmac
-import secrets
+
+from argon2 import PasswordHasher as Argon2PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
 _SCRYPT_N = 1 << 14
 _SCRYPT_R = 8
 _SCRYPT_P = 1
 
 
-class ScryptPasswordHasher:
-    def hash(self, password: str) -> str:
-        salt = secrets.token_bytes(16)
-        value = hashlib.scrypt(
-            password.encode(), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=32
-        )
-        return f"scrypt${_SCRYPT_N}${_SCRYPT_R}${_SCRYPT_P}${salt.hex()}${value.hex()}"
+class Argon2idPasswordHasher:
+    def __init__(self) -> None:
+        self._argon2 = Argon2PasswordHasher()
+        self._dummy_hash = self._argon2.hash("devops-hub-dummy-password-value")
 
-    def verify(self, password: str, encoded: str) -> bool:
+    def hash(self, password: str) -> str:
+        return self._argon2.hash(password)
+
+    def verify(self, password: str, encoded: str | None) -> bool:
+        if encoded is None:
+            try:
+                self._argon2.verify(self._dummy_hash, password)
+            except (InvalidHashError, VerificationError, VerifyMismatchError):
+                pass
+            return False
+        if encoded.startswith("$argon2id$"):
+            try:
+                return self._argon2.verify(encoded, password)
+            except (InvalidHashError, VerificationError, VerifyMismatchError):
+                return False
+        return self._verify_scrypt(password, encoded)
+
+    def needs_rehash(self, encoded: str) -> bool:
+        if not encoded.startswith("$argon2id$"):
+            return True
+        try:
+            return self._argon2.check_needs_rehash(encoded)
+        except InvalidHashError:
+            return True
+
+    @staticmethod
+    def _verify_scrypt(password: str, encoded: str) -> bool:
         try:
             algorithm, n, r, p, salt_hex, expected_hex = encoded.split("$", 5)
             if (
@@ -42,7 +67,3 @@ class ScryptPasswordHasher:
             return hmac.compare_digest(candidate, expected)
         except (ValueError, TypeError, MemoryError):
             return False
-
-
-def secret_digest(secret: str) -> str:
-    return hashlib.sha256(secret.encode()).hexdigest()

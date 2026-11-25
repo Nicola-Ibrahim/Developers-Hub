@@ -1,7 +1,9 @@
 """Real PostgreSQL verification for durable browser authentication and recovery."""
 
 import asyncio
+import hashlib
 from datetime import UTC, datetime, timedelta
+from threading import Event
 from uuid import uuid4
 
 import pytest
@@ -39,19 +41,18 @@ from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
 from identity.application.sessions.rotate_csrf.command import RotateCsrfCommand
 from identity.application.sessions.rotate_csrf.handler import RotateCsrfHandler
-from identity.domain.browser_errors import BrowserAuthenticationRejected
 from identity.domain.errors import IdentityValidationError
-from identity.infra.composition.browser_transactions import SqlAlchemyIdentityTransaction
+from identity.domain.session_errors import SessionAuthenticationRejected
+from identity.infra.composition.identity_transactions import SqlAlchemyIdentityTransaction
 from identity.infra.persistence.models.activity import IdentityActivityRow
 from identity.infra.persistence.models.session import (
-    BrowserLoginThrottleRow,
-    BrowserSessionRow,
+    LoginThrottleRow,
+    SessionRow,
 )
 from identity.infra.persistence.models.user import InternalUserRow, PasswordSetupRow
-from identity.infra.security.browser_tokens import JwtBrowserSessionTokens
-from identity.infra.security.login_verifier import LoginCredentialVerifier
-from identity.infra.security.passwords import ScryptPasswordHasher
-from identity.infra.security.tokens import PepperedTokenHasher, SecureTokenGenerator
+from identity.infra.security.jwt import JwtSessionTokens
+from identity.infra.security.opaque_secrets import PepperedTokenHasher, SecureTokenGenerator
+from identity.infra.security.passwords import Argon2idPasswordHasher
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
 pytestmark = pytest.mark.postgres
@@ -90,7 +91,7 @@ def test_deactivation_and_role_change_cannot_remove_both_admins(postgres_engine)
     assert results.count(None) == 1, results
     assert all(
         result is None
-        or isinstance(result, (BrowserAuthenticationRejected, IdentityValidationError))
+        or isinstance(result, (SessionAuthenticationRejected, IdentityValidationError))
         for result in results
     ), results
     with Session(postgres_engine) as session:
@@ -106,38 +107,33 @@ class IdentityFixture:
         self.sessions = sessions
         self.clock = clock
         transaction = SqlAlchemyIdentityTransaction(sessions, identity_repositories_for_session)
-        passwords = ScryptPasswordHasher()
+        passwords = Argon2idPasswordHasher()
         tokens = SecureTokenGenerator()
-        digest = PepperedTokenHasher(PEPPER).digest
+        hasher = PepperedTokenHasher(PEPPER)
+        digest = hasher.digest
         self.digest = digest
         self.handlers = {
             LoginCommand: LoginHandler(
                 transaction,
-                LoginCredentialVerifier(passwords),
+                passwords,
                 tokens,
-                clock,
-                digest,
-                (ORIGIN,),
-                JwtBrowserSessionTokens(PEPPER),
+                hasher,
+                JwtSessionTokens(PEPPER),
             ),
-            CreateUserCommand: CreateUserHandler(transaction, passwords, clock),
-            SetUserStatusCommand: SetUserStatusHandler(transaction, clock),
-            StartPasswordSetupCommand: StartPasswordSetupHandler(
-                transaction, clock, tokens.generate, digest
-            ),
+            CreateUserCommand: CreateUserHandler(transaction, passwords),
+            SetUserStatusCommand: SetUserStatusHandler(transaction),
+            StartPasswordSetupCommand: StartPasswordSetupHandler(transaction, tokens, hasher),
             CompletePasswordSetupCommand: CompletePasswordSetupHandler(
-                transaction, passwords, clock, digest
+                transaction, passwords, hasher
             ),
             AuthenticateSessionQuery: self._action_handler(
-                lambda _users, repository: AuthenticateSessionHandler(repository, clock, digest)
+                lambda _users, repository: AuthenticateSessionHandler(repository, hasher)
             ),
             RotateCsrfCommand: self._action_handler(
-                lambda _users, repository: RotateCsrfHandler(
-                    repository, clock, digest, tokens.generate
-                )
+                lambda _users, repository: RotateCsrfHandler(repository, hasher, tokens)
             ),
             LogoutCommand: self._action_handler(
-                lambda _users, repository: LogoutHandler(repository, clock, digest, (ORIGIN,))
+                lambda _users, repository: LogoutHandler(repository, hasher, (ORIGIN,))
             ),
         }
 
@@ -176,8 +172,8 @@ class IdentityFixture:
             )
 
 
-def perform_login(identity, user_name, password, project_id, origin):
-    return identity.execute(LoginCommand(user_name, password, project_id, origin))
+def perform_login(identity, user_name, password, project_id):
+    return identity.execute(LoginCommand(user_name, password, project_id))
 
 
 def seed_user(engine, role="admin"):
@@ -186,7 +182,7 @@ def seed_user(engine, role="admin"):
         id=user_id,
         name=f"operator-{user_id}",
         active=True,
-        password_hash=ScryptPasswordHasher().hash(PASSWORD),
+        password_hash=Argon2idPasswordHasher().hash(PASSWORD),
         credential_version=1,
     )
     user_name = user.name
@@ -198,16 +194,91 @@ def seed_user(engine, role="admin"):
     return user_id, project_id, user_name
 
 
+def test_login_upgrades_legacy_password_without_changing_credential_version(postgres_engine):
+    user_id, project_id, user_name = seed_user(postgres_engine)
+    salt = bytes(range(16))
+    encoded = hashlib.scrypt(PASSWORD.encode(), salt=salt, n=1 << 14, r=8, p=1, dklen=32)
+    with Session(postgres_engine) as session, session.begin():
+        user = session.get(InternalUserRow, user_id)
+        assert user is not None
+        user.password_hash = f"scrypt${1 << 14}$8$1${salt.hex()}${encoded.hex()}"
+        version = user.credential_version
+
+    database = async_engine_for(postgres_engine)
+    sessions = async_sessionmaker(database, expire_on_commit=False)
+    identity = IdentityFixture(sessions, lambda: datetime.now(UTC))
+
+    async def exercise():
+        try:
+            result = await perform_login(identity, user_name, PASSWORD, project_id)
+            assert result.principal.user_id == user_id
+        finally:
+            await database.dispose()
+
+    asyncio.run(exercise())
+    with Session(postgres_engine) as session:
+        user = session.get(InternalUserRow, user_id)
+        assert user is not None and user.password_hash is not None
+        assert user.password_hash.startswith("$argon2id$")
+        assert user.credential_version == version
+
+
+def test_password_change_during_login_verification_blocks_stale_session(postgres_engine):
+    user_id, project_id, user_name = seed_user(postgres_engine)
+    database = async_engine_for(postgres_engine)
+    sessions = async_sessionmaker(database, expire_on_commit=False)
+    identity = IdentityFixture(sessions, lambda: datetime.now(UTC))
+
+    async def exercise():
+        loop = asyncio.get_running_loop()
+        verification_started = asyncio.Event()
+        release_verification = Event()
+
+        class PausedHasher(Argon2idPasswordHasher):
+            def verify(self, password: str, encoded: str | None) -> bool:
+                loop.call_soon_threadsafe(verification_started.set)
+                assert release_verification.wait(10)
+                return super().verify(password, encoded)
+
+        identity.handlers[LoginCommand].passwords = PausedHasher()
+        login = asyncio.create_task(
+            perform_login(identity, user_name, PASSWORD, project_id)
+        )
+        try:
+            try:
+                await asyncio.wait_for(verification_started.wait(), 5)
+                async with asyncio.timeout(5):
+                    setup = await identity.execute(StartPasswordSetupCommand(user_id, user_id))
+                    await identity.execute(
+                        CompletePasswordSetupCommand(setup, "a-different-valid-password")
+                    )
+            finally:
+                release_verification.set()
+                with pytest.raises(SessionAuthenticationRejected):
+                    await asyncio.wait_for(login, 5)
+        finally:
+            await database.dispose()
+
+    asyncio.run(exercise())
+    with Session(postgres_engine) as session:
+        assert (
+            session.scalar(
+                select(func.count()).select_from(SessionRow).where(SessionRow.user_id == user_id)
+            )
+            == 0
+        )
+
+
 def test_browser_session_survives_service_restart_and_revokes_on_password_reset(postgres_engine):
     user_id, project_id, user_name = seed_user(postgres_engine)
     database = async_engine_for(postgres_engine)
-    now = datetime(2026, 11, 1, tzinfo=UTC)
+    now = datetime.now(UTC)
     current_time = [now]
     sessions = async_sessionmaker(database, expire_on_commit=False)
     first_service = IdentityFixture(sessions, lambda: current_time[0])
 
     async def exercise():
-        login = await perform_login(first_service, user_name, PASSWORD, project_id, ORIGIN)
+        login = await perform_login(first_service, user_name, PASSWORD, project_id)
         assert login.principal.user_id == user_id
         assert login.principal.role == "admin"
         assert login.session_token not in repr(login)
@@ -231,13 +302,13 @@ def test_browser_session_survives_service_restart_and_revokes_on_password_reset(
         assert principal.project_id == project_id
 
         current = await restarted.execute(RotateCsrfCommand(login.session_token))
-        with pytest.raises(BrowserAuthenticationRejected):
+        with pytest.raises(SessionAuthenticationRejected):
             await restarted.execute(LogoutCommand(login.session_token, login.csrf_token, ORIGIN))
         await restarted.execute(LogoutCommand(login.session_token, current.csrf_token, ORIGIN))
-        with pytest.raises(BrowserAuthenticationRejected):
+        with pytest.raises(SessionAuthenticationRejected):
             await restarted.execute(AuthenticateSessionQuery(login.session_token))
 
-        login = await perform_login(restarted, user_name, PASSWORD, project_id, ORIGIN)
+        login = await perform_login(restarted, user_name, PASSWORD, project_id)
         reset = await restarted.execute(StartPasswordSetupCommand(user_id, user_id))
         assert await restarted.execute(
             CompletePasswordSetupCommand(reset, "new-local-safe-password")
@@ -245,18 +316,16 @@ def test_browser_session_survives_service_restart_and_revokes_on_password_reset(
         assert not await restarted.execute(
             CompletePasswordSetupCommand(reset, "another-local-safe-password")
         )
-        with pytest.raises(BrowserAuthenticationRejected):
+        with pytest.raises(SessionAuthenticationRejected):
             await restarted.execute(AuthenticateSessionQuery(login.session_token))
         changed = await perform_login(
-            restarted, user_name, "new-local-safe-password", project_id, ORIGIN
+            restarted, user_name, "new-local-safe-password", project_id
         )
         assert changed.principal.user_id == user_id
 
         with Session(postgres_engine) as session:
-            stored = (
-                session.query(BrowserSessionRow).filter_by(id=changed.principal.session_id).one()
-            )
-            throttle = session.get(BrowserLoginThrottleRow, restarted.digest(user_name))
+            stored = session.query(SessionRow).filter_by(id=changed.principal.session_id).one()
+            throttle = session.get(LoginThrottleRow, restarted.digest(user_name))
             assert stored.token_digest != changed.session_token
             assert stored.csrf_digest != changed.csrf_token
             assert throttle is not None and throttle.failures == 0
@@ -400,17 +469,17 @@ def test_persistent_username_throttle_blocks_retries_without_revealing_account(p
 
     async def exercise():
         for _ in range(6):
-            with pytest.raises(BrowserAuthenticationRejected):
-                await perform_login(service, user_name, "incorrect password", None, ORIGIN)
+            with pytest.raises(SessionAuthenticationRejected):
+                await perform_login(service, user_name, "incorrect password", None)
         # The correct password remains blocked during the persisted lockout interval.
-        with pytest.raises(BrowserAuthenticationRejected):
-            await perform_login(service, user_name, PASSWORD, None, ORIGIN)
+        with pytest.raises(SessionAuthenticationRejected):
+            await perform_login(service, user_name, PASSWORD, None)
         with Session(postgres_engine) as session:
-            throttle = session.get(BrowserLoginThrottleRow, service.digest(user_name))
+            throttle = session.get(LoginThrottleRow, service.digest(user_name))
             assert throttle is not None
             assert throttle.failures == 6
             assert throttle.locked_until is not None
-            assert session.query(BrowserSessionRow).count() == 0
+            assert session.query(SessionRow).count() == 0
 
     try:
         asyncio.run(exercise())
@@ -422,25 +491,28 @@ def test_session_idle_and_absolute_expiry_and_disabled_user_rejection(postgres_e
     user_id, project_id, user_name = seed_user(postgres_engine, role="developer")
     database = async_engine_for(postgres_engine)
     sessions = async_sessionmaker(database, expire_on_commit=False)
-    now = [datetime(2026, 11, 1, tzinfo=UTC)]
-    service = IdentityFixture(sessions, lambda: now[0])
+    service = IdentityFixture(sessions, lambda: datetime.now(UTC))
 
     async def exercise():
-        login = await perform_login(service, user_name, PASSWORD, project_id, ORIGIN)
-        now[0] += timedelta(minutes=31)
-        with pytest.raises(BrowserAuthenticationRejected):
+        login = await perform_login(service, user_name, PASSWORD, project_id)
+        with Session(postgres_engine) as session, session.begin():
+            stored = session.get(SessionRow, login.principal.session_id)
+            assert stored is not None
+            stored.idle_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        with pytest.raises(SessionAuthenticationRejected):
             await service.execute(AuthenticateSessionQuery(login.session_token))
 
-        now[0] = datetime(2026, 11, 1, tzinfo=UTC)
-        login = await perform_login(service, user_name, PASSWORD, project_id, ORIGIN)
-        now[0] += timedelta(hours=8, seconds=1)
-        with pytest.raises(BrowserAuthenticationRejected):
+        login = await perform_login(service, user_name, PASSWORD, project_id)
+        with Session(postgres_engine) as session, session.begin():
+            stored = session.get(SessionRow, login.principal.session_id)
+            assert stored is not None
+            stored.absolute_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        with pytest.raises(SessionAuthenticationRejected):
             await service.execute(AuthenticateSessionQuery(login.session_token))
 
-        now[0] = datetime(2026, 11, 1, tzinfo=UTC)
-        login = await perform_login(service, user_name, PASSWORD, project_id, ORIGIN)
+        login = await perform_login(service, user_name, PASSWORD, project_id)
         await service.execute(SetUserStatusCommand(user_id, user_id, False))
-        with pytest.raises(BrowserAuthenticationRejected):
+        with pytest.raises(SessionAuthenticationRejected):
             await service.execute(AuthenticateSessionQuery(login.session_token))
 
     try:
@@ -453,25 +525,32 @@ def test_authorized_browser_activity_refreshes_idle_expiry(postgres_engine):
     _user_id, project_id, user_name = seed_user(postgres_engine)
     database = async_engine_for(postgres_engine)
     sessions = async_sessionmaker(database, expire_on_commit=False)
-    now = [datetime(2026, 11, 1, tzinfo=UTC)]
-    service = IdentityFixture(sessions, lambda: now[0])
+    service = IdentityFixture(sessions, lambda: datetime.now(UTC))
 
     async def exercise():
-        login = await perform_login(service, user_name, PASSWORD, project_id, ORIGIN)
-        now[0] += timedelta(minutes=20)
+        login = await perform_login(service, user_name, PASSWORD, project_id)
+        before_authentication = datetime.now(UTC)
+        with Session(postgres_engine) as session, session.begin():
+            stored = session.get(SessionRow, login.principal.session_id)
+            assert stored is not None
+            stored.last_seen_at = before_authentication - timedelta(minutes=20)
+            stored.idle_expires_at = before_authentication + timedelta(minutes=10)
         await service.execute(AuthenticateSessionQuery(login.session_token, project_id))
         members = await service.list_project_members(_user_id, project_id)
         assert len(members) == 1
 
         with Session(postgres_engine) as session:
-            stored = session.get(BrowserSessionRow, login.principal.session_id)
+            stored = session.get(SessionRow, login.principal.session_id)
             assert stored is not None
-            assert stored.last_seen_at == now[0]
-            assert stored.idle_expires_at == now[0] + timedelta(minutes=30)
+            assert stored.last_seen_at >= before_authentication
+            assert stored.idle_expires_at == stored.last_seen_at + timedelta(minutes=30)
 
         # Activity at minute 20 keeps the session usable after its original
         # minute-30 idle deadline while the absolute expiry stays unchanged.
-        now[0] += timedelta(minutes=20)
+        with Session(postgres_engine) as session, session.begin():
+            stored = session.get(SessionRow, login.principal.session_id)
+            assert stored is not None
+            stored.last_seen_at -= timedelta(minutes=20)
         assert (
             await service.execute(AuthenticateSessionQuery(login.session_token))
         ).user_id == _user_id
@@ -491,7 +570,7 @@ def test_membership_update_and_session_authorization_share_lock_order(postgres_e
                 id=second_admin_id,
                 name=f"second-admin-{second_admin_id}",
                 active=True,
-                password_hash=ScryptPasswordHasher().hash("another-safe-test-password"),
+                password_hash=Argon2idPasswordHasher().hash("another-safe-test-password"),
                 credential_version=1,
             )
         )
@@ -505,13 +584,13 @@ def test_membership_update_and_session_authorization_share_lock_order(postgres_e
     service = IdentityFixture(sessions, lambda: datetime.now(UTC))
 
     async def exercise():
-        login = await perform_login(service, user_name, PASSWORD, project_id, ORIGIN)
+        login = await perform_login(service, user_name, PASSWORD, project_id)
         digest = service.digest(login.session_token)
 
         async def authorize():
             async with sessions() as session, session.begin():
                 _users, repository = identity_repositories_for_session(session)
-                principal = await repository.authorize_browser_operation(
+                principal = await repository.authorize_session_operation(
                     digest, project_id, datetime.now(UTC)
                 )
                 assert principal is not None
@@ -545,7 +624,7 @@ def test_revocation_during_authority_lock_wait_is_revalidated(
     service = IdentityFixture(sessions, lambda: datetime.now(UTC))
 
     async def exercise():
-        login = await perform_login(service, user_name, PASSWORD, project_id, ORIGIN)
+        login = await perform_login(service, user_name, PASSWORD, project_id)
         digest = service.digest(login.session_token)
         discovered, resume = asyncio.Event(), asyncio.Event()
 
@@ -566,7 +645,7 @@ def test_revocation_during_authority_lock_wait_is_revalidated(
                     paused_lookup,
                 )
                 if operation == "authorize":
-                    return await repository.authorize_browser_operation(
+                    return await repository.authorize_session_operation(
                         digest, project_id, datetime.now(UTC)
                     )
                 return await repository.select_project(

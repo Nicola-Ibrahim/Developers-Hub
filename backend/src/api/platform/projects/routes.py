@@ -9,10 +9,10 @@ from fastapi import APIRouter, Depends
 
 from api.core.dependencies import platform_access
 from api.core.security.request_identity import (
-    BrowserRequestCredentials,
     RequestIdentity,
     request_identity,
 )
+from api.identity.authentication.credentials import BrowserCredentials, require_cookie_session
 from api.platform.projects.schemas import ProjectRegistrationView
 from devops_platform.application.interfaces.module import DeveloperPlatformModule
 from devops_platform.application.projects.get_project.query import (
@@ -50,8 +50,10 @@ async def projects(
     identity: FromDishka[IdentityModule],
     module: FromDishka[DeveloperPlatformModule],
 ) -> list[ProjectRegistrationView]:
-    if isinstance(credentials, BrowserRequestCredentials):
-        principal = await identity.query(AuthenticateSessionQuery(credentials.session_token))
+    if isinstance(credentials, BrowserCredentials):
+        principal = await identity.query(
+            AuthenticateSessionQuery(require_cookie_session(credentials))
+        )
         accesses = tuple(
             AccessContext(
                 principal.user_id,

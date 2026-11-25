@@ -1,47 +1,39 @@
-"""Application orchestration for browser password login."""
+"""Application orchestration for password login."""
 
-from collections.abc import Callable
+import asyncio
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime
 from uuid import UUID
 
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.result import LoginResult
-from identity.application.interfaces.browser_tokens import BrowserSessionTokenIssuer
-from identity.application.interfaces.browser_transactions import BrowserTransaction
-from identity.application.interfaces.login import LoginCredentialVerifier
-from identity.application.interfaces.security import TokenGenerator
-from identity.application.shared.session_security import require_browser_origin
-from identity.domain.aggregates.user import User
-from identity.domain.browser_errors import BrowserAuthenticationRejected
+from identity.application.interfaces.identity_transactions import IdentityTransaction
+from identity.application.interfaces.security import PasswordHasher, TokenGenerator, TokenHasher
+from identity.application.interfaces.session_tokens import SessionTokenIssuer
 from identity.domain.interfaces.session_repository import SessionRepository
 from identity.domain.interfaces.user_repository import UserRepository
 from identity.domain.records import AccountCredentials, SessionPrincipal
-from identity.domain.value_objects.credential_version import CredentialVersion
+from identity.domain.session_errors import SessionAuthenticationRejected
+from identity.domain.value_objects.session_expiry import SessionExpiry
 from identity.domain.value_objects.user_name import UserName
 
 
 class LoginHandler:
     def __init__(
         self,
-        transaction: BrowserTransaction,
-        credential_verifier: LoginCredentialVerifier,
+        transaction: IdentityTransaction,
+        passwords: PasswordHasher,
         tokens: TokenGenerator,
-        clock: Callable[[], datetime],
-        digest: Callable[[str], str],
-        allowed_origins: tuple[str, ...],
-        session_token_issuer: BrowserSessionTokenIssuer,
+        hasher: TokenHasher,
+        session_token_issuer: SessionTokenIssuer,
     ) -> None:
         self.transaction = transaction
-        self.credential_verifier = credential_verifier
+        self.passwords = passwords
         self.tokens = tokens
-        self.clock = clock
-        self.digest = digest
-        self.allowed_origins = allowed_origins
+        self.hasher = hasher
         self.session_token_issuer = session_token_issuer
 
     async def execute(self, command: LoginCommand) -> LoginResult:
-        require_browser_origin(command.origin, self.allowed_origins)
         name = UserName.parse(command.user_name).value
 
         async def read_account(
@@ -50,59 +42,36 @@ class LoginHandler:
             return await users.find_login_account(name)
 
         account = await self.transaction.run(read_account)
-        password_matches = await self.credential_verifier.verify(
-            command.password, account.password_hash if account is not None else None
+        password_matches = await asyncio.to_thread(
+            self.passwords.verify,
+            command.password,
+            account.password_hash if account is not None else None,
         )
-        identity_account = (
-            User(
-                id=account.user_id,
-                user_name=UserName.parse(account.user_name),
-                credential_version=CredentialVersion(account.credential_version),
-                active=account.active,
-            )
-            if account is not None
-            else None
-        )
-        accepted = bool(
-            identity_account is not None
-            and identity_account.accepts_credentials(password_matches=password_matches)
-        )
-        now = self.clock()
-        token = self.session_token_issuer.issue(
-            str(identity_account.id) if identity_account is not None else "invalid-account",
-            now,
-            now + timedelta(hours=8),
-        )
-        csrf = self.tokens.generate()
+        accepted = bool(account is not None and account.active and password_matches)
+        replacement_hash = None
+        if account is not None and accepted and self.passwords.needs_rehash(account.password_hash):
+            replacement_hash = await asyncio.to_thread(self.passwords.hash, command.password)
 
         async def complete_login(
             users: UserRepository, sessions: SessionRepository
-        ) -> tuple[SessionPrincipal, UUID, datetime] | None:
+        ) -> tuple[tuple[SessionPrincipal, UUID, datetime], str, str] | None:
+            now = datetime.now(UTC)
             login_account = await users.record_login_attempt(
                 user_name=name,
-                username_digest=self.digest(name),
-                expected_version=(
-                    identity_account.login_fence() if identity_account is not None else None
-                ),
+                username_digest=self.hasher.digest(name),
+                expected_version=account.credential_version if account is not None else None,
                 accepted=accepted,
+                replacement_password_hash=replacement_hash,
                 now=now,
             )
             if login_account is None:
                 return None
-            user_id, user_name, credential_version = login_account
-            return await sessions.create_login_session(
-                user_id=user_id,
-                user_name=user_name,
-                credential_version=credential_version,
-                token_digest=self.digest(token),
-                csrf_digest=self.digest(csrf),
-                now=now,
-            )
+            return await self._issue_credentials(sessions, *login_account, now)
 
         result = await self.transaction.run(complete_login)
         if result is None:
-            raise BrowserAuthenticationRejected()
-        principal, _, expires = result
+            raise SessionAuthenticationRejected()
+        (principal, _, expires), token, csrf = result
         project_id = command.project_id
         if project_id is not None:
 
@@ -110,16 +79,40 @@ class LoginHandler:
                 _users: UserRepository, sessions: SessionRepository
             ) -> SessionPrincipal | None:
                 return await sessions.select_project(
-                    token_digest=self.digest(token), project_id=project_id, now=self.clock()
+                    token_digest=self.hasher.digest(token),
+                    project_id=project_id,
+                    now=datetime.now(UTC),
                 )
 
             selected = await self.transaction.run(select_project)
             if selected is None:
 
                 async def revoke_login(_users: UserRepository, sessions: SessionRepository) -> None:
-                    await sessions.logout(self.digest(token), self.clock())
+                    await sessions.logout(self.hasher.digest(token), datetime.now(UTC))
 
                 await self.transaction.run(revoke_login)
-                raise BrowserAuthenticationRejected()
+                raise SessionAuthenticationRejected()
             principal = selected
         return LoginResult(token, csrf, replace(principal, csrf_token=csrf), expires)
+
+    async def _issue_credentials(
+        self,
+        sessions: SessionRepository,
+        user_id: UUID,
+        user_name: str,
+        credential_version: int,
+        now: datetime,
+    ) -> tuple[tuple[SessionPrincipal, UUID, datetime], str, str]:
+        token = self.session_token_issuer.issue(
+            str(user_id), now, SessionExpiry.from_login(now).absolute_at
+        )
+        csrf = self.tokens.generate()
+        session = await sessions.create_login_session(
+            user_id=user_id,
+            user_name=user_name,
+            credential_version=credential_version,
+            token_digest=self.hasher.digest(token),
+            csrf_digest=self.hasher.digest(csrf),
+            now=now,
+        )
+        return session, token, csrf

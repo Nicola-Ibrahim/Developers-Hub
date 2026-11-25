@@ -16,26 +16,20 @@ from identity.application.accounts.start_password_setup.handler import StartPass
 from identity.application.api_tokens.authenticate_api_token.handler import (
     AuthenticateApiTokenHandler,
 )
-from identity.application.api_tokens.issue_api_token.handler import IssueApiTokenHandler
 from identity.application.api_tokens.revoke_api_token.handler import RevokeApiTokenHandler
 from identity.application.authentication.login.handler import LoginHandler
 from identity.application.interfaces.authorization import AuthorizationDecisionPort
-from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
-from identity.application.interfaces.browser_transactions import BrowserTransaction
 from identity.application.interfaces.dispatch import IdentityModule
+from identity.application.interfaces.identity_transactions import IdentityTransaction
 from identity.application.interfaces.security import PasswordHasher, TokenGenerator, TokenHasher
+from identity.application.interfaces.session_tokens import SessionTokenVerifier
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.infra.authorization.opa import OpaAuthorizationClient
-from identity.infra.composition.api_token_transactions import (
-    IssueApiTokenToFile,
-)
 from identity.infra.composition.module import IdentityModuleDispatcher
 from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
-from identity.infra.security.browser_tokens import JwtBrowserSessionTokens
-from identity.infra.security.login_verifier import LoginCredentialVerifier
-from identity.infra.security.passwords import ScryptPasswordHasher
-from identity.infra.security.tokens import PepperedTokenHasher, SecureTokenGenerator
-from shared.infra.clock import Clock
+from identity.infra.security.jwt import JwtSessionTokens
+from identity.infra.security.opaque_secrets import PepperedTokenHasher, SecureTokenGenerator
+from identity.infra.security.passwords import Argon2idPasswordHasher
 from shared.infra.settings import Settings
 
 
@@ -45,49 +39,43 @@ class IdentityTokenScopePolicy:
 
 
 class IdentityProvider(Provider):
-    password_hasher = provide(ScryptPasswordHasher, provides=PasswordHasher, scope=Scope.APP)
+    password_hasher = provide(Argon2idPasswordHasher, provides=PasswordHasher, scope=Scope.APP)
 
     @provide(scope=Scope.APP)
-    def browser_session_tokens(self, settings: Settings) -> JwtBrowserSessionTokens:
-        return JwtBrowserSessionTokens(settings.token_pepper.get_secret_value())
+    def session_tokens(self, settings: Settings) -> JwtSessionTokens:
+        return JwtSessionTokens(settings.token_pepper.get_secret_value())
 
     @provide(scope=Scope.APP)
-    def browser_session_token_verifier(
-        self, tokens: JwtBrowserSessionTokens
-    ) -> BrowserSessionTokenVerifier:
+    def session_token_verifier(self, tokens: JwtSessionTokens) -> SessionTokenVerifier:
         return tokens
 
     @provide(scope=Scope.REQUEST)
     def create_user(
-        self, transaction: BrowserTransaction, passwords: PasswordHasher, clock: Clock
+        self, transaction: IdentityTransaction, passwords: PasswordHasher
     ) -> CreateUserHandler:
-        return CreateUserHandler(transaction, passwords, clock)
+        return CreateUserHandler(transaction, passwords)
 
     @provide(scope=Scope.REQUEST)
-    def set_user_status(
-        self, transaction: BrowserTransaction, clock: Clock
-    ) -> SetUserStatusHandler:
-        return SetUserStatusHandler(transaction, clock)
+    def set_user_status(self, transaction: IdentityTransaction) -> SetUserStatusHandler:
+        return SetUserStatusHandler(transaction)
 
     @provide(scope=Scope.REQUEST)
     def start_password_setup(
         self,
-        transaction: BrowserTransaction,
-        clock: Clock,
+        transaction: IdentityTransaction,
         generator: TokenGenerator,
         hasher: TokenHasher,
     ) -> StartPasswordSetupHandler:
-        return StartPasswordSetupHandler(transaction, clock, generator.generate, hasher.digest)
+        return StartPasswordSetupHandler(transaction, generator, hasher)
 
     @provide(scope=Scope.REQUEST)
     def complete_password_setup(
         self,
-        transaction: BrowserTransaction,
-        clock: Clock,
+        transaction: IdentityTransaction,
         hasher: TokenHasher,
         passwords: PasswordHasher,
     ) -> CompletePasswordSetupHandler:
-        return CompletePasswordSetupHandler(transaction, passwords, clock, hasher.digest)
+        return CompletePasswordSetupHandler(transaction, passwords, hasher)
 
     @provide(scope=Scope.REQUEST)
     def identity_module(self, container: AsyncContainer) -> IdentityModule:
@@ -105,43 +93,28 @@ class IdentityProvider(Provider):
         return OpaAuthorizationClient(settings.opa_url, client)
 
     @provide(scope=Scope.REQUEST)
-    def change_browser_password(
+    def change_password(
         self,
-        transaction: BrowserTransaction,
-        clock: Clock,
-        hasher: TokenHasher,
-        settings: Settings,
+        transaction: IdentityTransaction,
         passwords: PasswordHasher,
     ) -> ChangePasswordHandler:
-        return ChangePasswordHandler(
-            transaction,
-            passwords,
-            clock,
-            hasher.digest,
-            settings.browser_allowed_origins,
-        )
-
-    @provide(scope=Scope.APP)
-    def login_credential_verifier(self, passwords: PasswordHasher) -> LoginCredentialVerifier:
-        return LoginCredentialVerifier(passwords)
+        return ChangePasswordHandler(transaction, passwords)
 
     @provide(scope=Scope.REQUEST)
     def login_handler(
         self,
-        transaction: BrowserTransaction,
-        login_credential_verifier: LoginCredentialVerifier,
+        transaction: IdentityTransaction,
+        passwords: PasswordHasher,
         generator: TokenGenerator,
         token_hasher: TokenHasher,
-        session_token_issuer: JwtBrowserSessionTokens,
-        clock: Clock,
+        session_token_issuer: JwtSessionTokens,
         settings: Settings,
     ) -> LoginHandler:
         return LoginHandler(
             transaction,
-            login_credential_verifier,
+            passwords,
             generator,
-            clock,
-            token_hasher.digest,
+            token_hasher,
             settings.browser_allowed_origins,
             session_token_issuer,
         )
@@ -159,17 +132,3 @@ class IdentityProvider(Provider):
     )
     authenticate = provide(AuthenticateApiTokenHandler, scope=Scope.REQUEST)
     revoke = provide(RevokeApiTokenHandler, scope=Scope.REQUEST)
-    issue_command = provide(IssueApiTokenToFile, scope=Scope.REQUEST)
-
-    @provide(scope=Scope.REQUEST)
-    def issue(
-        self,
-        repository: ApiTokenRepository,
-        hasher: TokenHasher,
-        generator: TokenGenerator,
-        clock: Clock,
-        scope_policy: IdentityTokenScopePolicy,
-    ) -> IssueApiTokenHandler:
-        return IssueApiTokenHandler(
-            repository, hasher, generator, clock, scope_policy.scopes, scope_policy.scopes
-        )

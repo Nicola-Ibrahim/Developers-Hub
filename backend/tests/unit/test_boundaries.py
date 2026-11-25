@@ -238,12 +238,12 @@ def boundary_failures(sources):
 
 def test_indirect_package_reexport_cannot_smuggle_infrastructure_into_core():
     sources = {
-        "identity": ("from .infra.security.tokens import PepperedTokenHasher", True),
+        "identity": ("from .infra.security.opaque_secrets import PepperedTokenHasher", True),
         "identity.application.flow": ("from identity import PepperedTokenHasher", False),
-        "identity.infra.security.tokens": ("import hmac", False),
+        "identity.infra.security.opaque_secrets": ("import hmac", False),
     }
     failures = boundary_failures(sources)
-    assert "identity.application.flow -> identity.infra.security.tokens" in failures
+    assert "identity.application.flow -> identity.infra.security.opaque_secrets" in failures
     assert "identity.application.flow -> hmac" in failures
 
 
@@ -262,7 +262,7 @@ def test_indirect_package_reexport_cannot_smuggle_infrastructure_into_core():
         ("api.platform.module", "from devops_platform.infra.composition import module", False),
         ("shared.infra.database", "import containers.http", True),
         ("identity.contracts", "from .infra import tokens", True),
-        ("identity.infra.security.tokens", "from shared.infra import database", False),
+        ("identity.infra.security.opaque_secrets", "from shared.infra import database", False),
         ("devops_platform.infra.persistence", "from identity.domain import records", True),
         ("identity.infra.persistence", "from .models import InternalUserRow", False),
         ("identity.infra.persistence", "import sqlalchemy", False),
@@ -293,7 +293,7 @@ class DenyIO(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0,DenyIO())
 if sys.argv[2]=='identity':
     import identity.application.api_tokens.authenticate_api_token.handler
-    import identity.application.api_tokens.issue_api_token.handler
+    import identity.application.api_tokens.manage_personal_tokens
     import identity.application.api_tokens.revoke_api_token.handler
 else:
     import devops_platform.application.resource_management.catalog.handler,devops_platform.domain

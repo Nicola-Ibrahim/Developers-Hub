@@ -1,5 +1,4 @@
 import asyncio
-import stat
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -9,6 +8,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from conftest import migration_config
+from fastapi import Request
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, inspect, select, text
 from sqlalchemy.exc import IntegrityError
@@ -17,20 +17,22 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from api.app import create_app
+from api.composition.identity_preconditions import browser_write_precondition
+from api.core.errors import APIError
 from composition.container import BackendContainer
 from composition.integrations.project_access_persistence import api_token_repository_for_session
 from composition.integrations.project_registration import RegisterProjectCommandHandler
 from devops_platform.application.projects.command import RegisterProjectCommand
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
 from devops_platform.infra.persistence.models.resources import Resource
-from identity.application.api_tokens.issue_api_token.command import IssueApiTokenCommand
+from identity.application.api_tokens.personal_token_messages import CreatePersonalTokenCommand
 from identity.application.api_tokens.revoke_api_token.command import RevokeApiTokenCommand
 from identity.application.api_tokens.revoke_api_token.handler import RevokeApiTokenHandler
-from identity.application.shared.errors import CredentialDeliveryError
-from identity.infra.composition.api_token_transactions import IssueApiTokenToFile
+from identity.application.interfaces.dispatch import IdentityModule
 from identity.infra.persistence.models.api_token import ApiAccessTokenRow
+from identity.infra.persistence.models.session import SessionRow
 from identity.infra.persistence.models.user import InternalUserRow
-from identity.infra.security.credential_file import PrivateCredentialFile
+from identity.infra.security.opaque_secrets import PepperedTokenHasher
 from migrations.metadata import registered_metadata
 from shared.infra.persistence.audit import AuditEvent
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
@@ -70,15 +72,44 @@ def client_for(sync_engine, config=None):
         asyncio.run(database.dispose())
 
 
-async def issue_with_container(database: AsyncEngine, path, config, user, project, **kwargs):
+def mutation_request(session_token: str, csrf_token: str, origin: str) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "headers": [
+                (b"cookie", f"devops_session={session_token}".encode()),
+                (b"x-csrf-token", csrf_token.encode()),
+                (b"origin", origin.encode()),
+            ],
+        }
+    )
+
+
+async def issue_with_container(
+    database: AsyncEngine, config, actor_id, project_id, session_token, csrf_token, **kwargs
+):
     container = BackendContainer(config, engine=database).combined()
     try:
         async with container() as scope:
-            service = await scope.get(IssueApiTokenToFile)
-            return await service.execute(
-                IssueApiTokenCommand(user_name=user, project_name=project, **kwargs),
-                PrivateCredentialFile(path),
+            module = await scope.get(IdentityModule)
+            token, secret = await module.execute_with_precondition(
+                CreatePersonalTokenCommand(
+                    actor_id,
+                    project_id,
+                    "integration",
+                    kwargs.get("scopes", ("catalog:read",)),
+                    kwargs.get("hours", 24),
+                ),
+                browser_write_precondition(
+                    mutation_request(session_token, csrf_token, config.browser_allowed_origins[0]),
+                    actor_id,
+                    PepperedTokenHasher(config.token_pepper.get_secret_value()),
+                    expected_project_id=project_id,
+                    check_project=True,
+                ),
             )
+            return token.token_id, secret
     finally:
         await container.close()
 
@@ -109,6 +140,8 @@ def register_project(sync_engine, project, config=None):
 
 
 def prepare_token_membership(sync_engine, user, project):
+    session_token, csrf_token = f"session-{uuid4()}", f"csrf-{uuid4()}"
+    hasher = PepperedTokenHasher(PEPPER)
     with Session(sync_engine) as session, session.begin():
         project_row = session.scalar(select(ProjectRow).where(ProjectRow.name == project))
         assert project_row is not None
@@ -125,19 +158,36 @@ def prepare_token_membership(sync_engine, user, project):
                     role="developer",
                 )
             )
+        now = datetime.now(UTC)
+        session.add(
+            SessionRow(
+                id=uuid4(),
+                user_id=user_row.id,
+                token_digest=hasher.digest(session_token),
+                csrf_digest=hasher.digest(csrf_token),
+                selected_project_id=project_row.id,
+                credential_version=user_row.credential_version,
+                created_at=now,
+                last_seen_at=now,
+                idle_expires_at=now + timedelta(hours=8),
+                absolute_expires_at=now + timedelta(days=7),
+            )
+        )
+        user_id, project_id = user_row.id, project_row.id
+    return user_id, project_id, session_token, csrf_token
 
 
-def issue(sync_engine, path, user="developer", project="project", **kwargs):
+def issue(sync_engine, user="developer", project="project", **kwargs):
     database = async_engine_for(sync_engine)
     try:
         asyncio.run(register_project_with_container(database, settings(), project))
-        prepare_token_membership(sync_engine, user, project)
-        token_id = asyncio.run(
-            issue_with_container(database, path, settings(), user, project, **kwargs)
+        credentials = prepare_token_membership(sync_engine, user, project)
+        token_id, secret = asyncio.run(
+            issue_with_container(database, settings(), *credentials, **kwargs)
         )
     finally:
         asyncio.run(database.dispose())
-    return token_id, path.read_text().strip()
+    return token_id, secret
 
 
 async def revoke_with_container(database: AsyncEngine, token_id, config):
@@ -168,9 +218,8 @@ def test_migrations_roundtrip_and_metadata_match(postgres_engine):
         assert compare_metadata(MigrationContext.configure(connection), registered_metadata()) == []
 
 
-def test_issue_authenticate_and_revoke(postgres_engine, tmp_path, capsys):
-    token_id, token = issue(postgres_engine, tmp_path / "credential")
-    assert stat.S_IMODE((tmp_path / "credential").stat().st_mode) == 0o600
+def test_issue_authenticate_and_revoke(postgres_engine, capsys):
+    token_id, token = issue(postgres_engine)
     with Session(postgres_engine) as session:
         record = session.get(ApiAccessTokenRow, token_id)
         assert record.digest != token
@@ -192,8 +241,8 @@ def test_issue_authenticate_and_revoke(postgres_engine, tmp_path, capsys):
 
 
 @pytest.mark.parametrize("change", ["expired", "disabled", "membership_removed", "wrong_token"])
-def test_invalid_identity_and_membership_are_denied(postgres_engine, tmp_path, change):
-    token_id, token = issue(postgres_engine, tmp_path / "credential")
+def test_invalid_identity_and_membership_are_denied(postgres_engine, change):
+    token_id, token = issue(postgres_engine)
     with Session(postgres_engine) as session, session.begin():
         record = session.get(ApiAccessTokenRow, token_id)
         if change == "expired":
@@ -211,11 +260,9 @@ def test_invalid_identity_and_membership_are_denied(postgres_engine, tmp_path, c
         )
 
 
-def test_project_bound_principals_and_scope_enforcement(postgres_engine, tmp_path):
-    _, first = issue(postgres_engine, tmp_path / "one", user="one", project="one")
-    _, second = issue(
-        postgres_engine, tmp_path / "two", user="two", project="two", scopes=("resources:read",)
-    )
+def test_project_bound_principals_and_scope_enforcement(postgres_engine):
+    _, first = issue(postgres_engine, user="one", project="one")
+    _, second = issue(postgres_engine, user="two", project="two", scopes=("resources:read",))
     with client_for(postgres_engine) as client:
         one = client.get("/api/v1/me", headers={"Authorization": "Bearer " + first}).json()
         two = client.get("/api/v1/me", headers={"Authorization": "Bearer " + second}).json()
@@ -226,37 +273,20 @@ def test_project_bound_principals_and_scope_enforcement(postgres_engine, tmp_pat
         )
 
 
-def test_existing_output_does_not_get_overwritten_or_commit_identity(postgres_engine, tmp_path):
-    output = tmp_path / "existing"
-    output.write_text("original")
-    with pytest.raises(CredentialDeliveryError):
-        issue(postgres_engine, output, user="new", project="new")
-    assert output.read_text() == "original"
-    with Session(postgres_engine) as session:
-        assert session.scalar(select(func.count()).select_from(InternalUserRow)) == 1
-        assert session.scalar(select(func.count()).select_from(ApiAccessTokenRow)) == 0
-        assert session.scalar(select(func.count()).select_from(ProjectMembershipRow)) == 1
-        assert session.scalar(select(func.count()).select_from(AuditEvent)) == 0
-        # Trusted project registration is a separate, prior operator operation.
-        assert session.scalar(select(func.count()).select_from(ProjectRow)) == 1
-
-
-def test_failed_commit_removes_new_token_file(postgres_engine, tmp_path):
+def test_failed_commit_rolls_back_new_token(postgres_engine):
     def fail_commit(session):
         raise RuntimeError("simulated commit failure")
 
-    output = tmp_path / "credential"
     database = async_engine_for(postgres_engine)
     asyncio.run(register_project_with_container(database, settings(), "new"))
-    prepare_token_membership(postgres_engine, "new", "new")
+    credentials = prepare_token_membership(postgres_engine, "new", "new")
     event.listen(database.sync_engine, "commit", fail_commit)
     try:
         with pytest.raises(RuntimeError):
-            asyncio.run(issue_with_container(database, output, settings(), "new", "new"))
+            asyncio.run(issue_with_container(database, settings(), *credentials))
     finally:
         event.remove(database.sync_engine, "commit", fail_commit)
         asyncio.run(database.dispose())
-    assert not output.exists()
     with Session(postgres_engine) as session:
         assert session.scalar(select(func.count()).select_from(InternalUserRow)) == 1
         assert session.scalar(select(func.count()).select_from(ProjectMembershipRow)) == 1
@@ -273,8 +303,8 @@ def test_readiness_requires_expected_migration(postgres_engine):
         assert response.json()["code"] == "schema_not_ready"
 
 
-def test_database_enforces_resource_state_and_lease(postgres_engine, tmp_path):
-    token_id, _ = issue(postgres_engine, tmp_path / "credential")
+def test_database_enforces_resource_state_and_lease(postgres_engine):
+    token_id, _ = issue(postgres_engine)
     with Session(postgres_engine) as session:
         token = session.get(ApiAccessTokenRow, token_id)
         user_id, project_id = token.user_id, token.project_id
@@ -295,8 +325,8 @@ def test_database_enforces_resource_state_and_lease(postgres_engine, tmp_path):
         )
 
 
-def test_pre_refactor_token_digest_still_authenticates(postgres_engine, tmp_path):
-    token_id, _ = issue(postgres_engine, tmp_path / "credential")
+def test_pre_refactor_token_digest_still_authenticates(postgres_engine):
+    token_id, _ = issue(postgres_engine)
     # Captured from the old implementation using synthetic values before the move.
     legacy_token = "synthetic-existing-token-32-characters"
     legacy_pepper = "synthetic-fixed-pepper-32-characters"
@@ -315,48 +345,64 @@ def test_pre_refactor_token_digest_still_authenticates(postgres_engine, tmp_path
         )
 
 
-def test_disabled_account_cannot_receive_token_for_current_membership(postgres_engine, tmp_path):
-    token_id, _ = issue(postgres_engine, tmp_path / "credential")
+def test_disabled_account_cannot_receive_token_for_current_membership(postgres_engine):
+    token_id, _ = issue(postgres_engine)
     from devops_platform.infra.persistence.models.project_access import ProjectRow
-    from identity.domain.errors import IdentityValidationError
 
     with Session(postgres_engine) as session, session.begin():
         session.get(
             InternalUserRow, session.get(ApiAccessTokenRow, token_id).user_id
         ).active = False
     register_project(postgres_engine, "second")
-    with pytest.raises(IdentityValidationError):
-        issue(postgres_engine, tmp_path / "second", project="second")
+    with pytest.raises(APIError) as rejected:
+        issue(postgres_engine, project="second")
+    assert rejected.value.status == 401
     with Session(postgres_engine) as session:
         # Project registration is already committed independently of identity token issuance.
         assert session.scalar(select(func.count()).select_from(ProjectRow)) == 2
         assert session.scalar(select(func.count()).select_from(ProjectMembershipRow)) == 2
         assert session.scalar(select(func.count()).select_from(AuditEvent)) == 1
-    assert not (tmp_path / "second").exists()
 
 
 @pytest.mark.parametrize("account_exists", [False, True])
 def test_token_issuance_does_not_create_missing_account_or_membership(
-    postgres_engine, tmp_path, account_exists
+    postgres_engine, account_exists
 ):
-    register_project(postgres_engine, "existing-project")
+    project_id = register_project(postgres_engine, "existing-project").project_id
+    user_id = uuid4()
+    session_token, csrf_token = f"session-{uuid4()}", f"csrf-{uuid4()}"
+    hasher = PepperedTokenHasher(PEPPER)
     if account_exists:
         with Session(postgres_engine) as session, session.begin():
-            session.add(InternalUserRow(name="unprovisioned"))
-    output = tmp_path / "credential"
-    database = async_engine_for(postgres_engine)
-    try:
-        from identity.domain.errors import IdentityValidationError
-
-        with pytest.raises(IdentityValidationError):
-            asyncio.run(
-                issue_with_container(
-                    database, output, settings(), "unprovisioned", "existing-project"
+            user = InternalUserRow(id=user_id, name="unprovisioned")
+            session.add(user)
+            session.flush()
+            now = datetime.now(UTC)
+            session.add(
+                SessionRow(
+                    id=uuid4(),
+                    user_id=user.id,
+                    token_digest=hasher.digest(session_token),
+                    csrf_digest=hasher.digest(csrf_token),
+                    selected_project_id=project_id,
+                    credential_version=user.credential_version,
+                    created_at=now,
+                    last_seen_at=now,
+                    idle_expires_at=now + timedelta(hours=8),
+                    absolute_expires_at=now + timedelta(days=7),
                 )
             )
+    database = async_engine_for(postgres_engine)
+    try:
+        with pytest.raises(APIError) as rejected:
+            asyncio.run(
+                issue_with_container(
+                    database, settings(), user_id, project_id, session_token, csrf_token
+                )
+            )
+        assert rejected.value.status == 401
     finally:
         asyncio.run(database.dispose())
-    assert not output.exists()
     with Session(postgres_engine) as session:
         assert session.scalar(select(func.count()).select_from(InternalUserRow)) == int(
             account_exists
@@ -366,8 +412,8 @@ def test_token_issuance_does_not_create_missing_account_or_membership(
         assert session.scalar(select(func.count()).select_from(AuditEvent)) == 0
 
 
-def test_revoke_is_idempotent_and_does_not_duplicate_audit(postgres_engine, tmp_path):
-    token_id, _ = issue(postgres_engine, tmp_path / "credential")
+def test_revoke_is_idempotent_and_does_not_duplicate_audit(postgres_engine):
+    token_id, _ = issue(postgres_engine)
     assert revoke(postgres_engine, token_id)
     assert revoke(postgres_engine, token_id)
     assert not revoke(postgres_engine, uuid4())
@@ -375,14 +421,11 @@ def test_revoke_is_idempotent_and_does_not_duplicate_audit(postgres_engine, tmp_
         assert session.scalar(select(func.count()).select_from(AuditEvent)) == 2
 
 
-def test_concurrent_token_revocation_preserves_first_timestamp_and_single_audit(
-    postgres_engine, tmp_path
-):
-    token_id, _ = issue(postgres_engine, tmp_path / "credential")
+def test_concurrent_token_revocation_preserves_first_timestamp_and_single_audit(postgres_engine):
+    token_id, _ = issue(postgres_engine)
     database = async_engine_for(postgres_engine)
     sessions = async_sessionmaker(database, expire_on_commit=False)
-    first_revoked_at = datetime(2026, 11, 19, 12, 0, tzinfo=UTC)
-    second_revoked_at = datetime(2026, 11, 19, 12, 1, tzinfo=UTC)
+    first_revocation_times = []
     first_token_locked = asyncio.Event()
     second_query_started = asyncio.Event()
     release_first = asyncio.Event()
@@ -405,6 +448,7 @@ def test_concurrent_token_revocation_preserves_first_timestamp_and_single_audit(
                         return status
 
                     async def revoke_api_token(self, token_id, revoked_at):
+                        first_revocation_times.append(revoked_at)
                         await repository.revoke_api_token(token_id, revoked_at)
 
                     async def record_token_audit(self, event):
@@ -442,11 +486,11 @@ def test_concurrent_token_revocation_preserves_first_timestamp_and_single_audit(
     async def exercise():
         tasks = []
         try:
-            first_handler = RevokeApiTokenHandler(PausingTransaction(), lambda: first_revoked_at)
+            first_handler = RevokeApiTokenHandler(PausingTransaction())
             first_task = asyncio.create_task(first_handler.execute(RevokeApiTokenCommand(token_id)))
             tasks.append(first_task)
             await asyncio.wait_for(first_token_locked.wait(), timeout=10)
-            second_handler = RevokeApiTokenHandler(ObservedTransaction(), lambda: second_revoked_at)
+            second_handler = RevokeApiTokenHandler(ObservedTransaction())
             second_task = asyncio.create_task(
                 second_handler.execute(RevokeApiTokenCommand(token_id))
             )
@@ -463,7 +507,7 @@ def test_concurrent_token_revocation_preserves_first_timestamp_and_single_audit(
     assert asyncio.run(exercise()) == [True, True]
     with Session(postgres_engine) as session:
         token = session.get(ApiAccessTokenRow, token_id)
-        assert token.revoked_at == first_revoked_at
+        assert first_revocation_times == [token.revoked_at]
         persisted_revocation = token.revoked_at
         revocation_audits = session.scalars(
             select(AuditEvent).where(

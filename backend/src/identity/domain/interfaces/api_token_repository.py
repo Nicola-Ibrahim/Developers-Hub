@@ -9,7 +9,6 @@ from identity.domain.records import (
     ApiTokenAuditEvent,
     ApiTokenStatus,
     PersonalApiToken,
-    ProjectMembershipStatus,
 )
 
 
@@ -17,22 +16,6 @@ class ApiTokenRepository(Protocol):
     """Token queries and writes; transaction completion belongs to the host."""
 
     async def find_token_credential(self, digest: str) -> ApiTokenAuthenticationDetails | None: ...
-
-    async def require_project_membership(
-        self, *, user_name: str, project_name: str
-    ) -> ProjectMembershipStatus: ...
-
-    async def insert_api_token(
-        self,
-        *,
-        user_id: UUID,
-        project_id: UUID,
-        digest: str,
-        scopes: tuple[str, ...],
-        expires_at: datetime,
-        created_at: datetime,
-        name: str = "Legacy token",
-    ) -> UUID: ...
 
     async def record_token_audit(self, event: ApiTokenAuditEvent) -> None: ...
 

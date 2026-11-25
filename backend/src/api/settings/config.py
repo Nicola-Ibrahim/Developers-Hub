@@ -101,3 +101,7 @@ def get_api_settings() -> APISettings:
 @dataclass(frozen=True, slots=True)
 class BrowserCookiePolicy:
     secure: bool
+    allowed_origins: tuple[str, ...] = (
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    )

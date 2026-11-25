@@ -8,7 +8,8 @@ from fastapi import Request
 
 from api.composition.browser_access import authenticate_browser_operation
 from api.composition.platform_access import authenticate_platform_access
-from api.core.security.request_identity import BrowserRequestCredentials, RequestIdentity
+from api.core.security.request_identity import RequestIdentity
+from api.identity.authentication.credentials import BrowserCredentials, require_browser_mutation
 from devops_platform.application.applications.create_application.command import (
     CreateApplication,
 )
@@ -46,7 +47,6 @@ from devops_platform.authorization import ALL_SCOPES, authorize_platform_action
 from devops_platform.infra.composition.module import DeveloperPlatformModuleDispatcher
 from identity.domain.interfaces.project_access import IdentityProjectAccess
 from shared.dispatch import Command, Query
-from shared.infra.clock import Clock
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
 
@@ -71,12 +71,11 @@ class PlatformRequestModule(DeveloperPlatformModule):
     """HTTP boundary that revalidates credentials and authorizes in one transaction."""
 
     def __init__(
-        self, container: AsyncContainer, request: Request, settings: Settings, clock: Clock
+        self, container: AsyncContainer, request: Request, settings: Settings
     ) -> None:
         self._container = container
         self._request = request
         self._settings = settings
-        self._clock = clock
 
     async def execute(self, command: Command[ResultT]) -> ResultT:
         if isinstance(command, ProcessGithubPreviewWebhook):
@@ -119,6 +118,8 @@ class PlatformRequestModule(DeveloperPlatformModule):
         ):
             raise TypeError("Platform message lacks access context")
         token: RequestIdentity = getattr(self._request.state, "request_identity", None)
+        if isinstance(token, BrowserCredentials) and token.mutate:
+            require_browser_mutation(self._request, self._settings.browser_allowed_origins)
         async with self._container(scope=Scope.ACTION) as action_container:
             unit = await action_container.get(SqlAlchemyUnitOfWork, component=_ACTION_COMPONENT)
             project_access = await action_container.get(
@@ -130,13 +131,12 @@ class PlatformRequestModule(DeveloperPlatformModule):
 
             async def authorized() -> ResultT:
                 if isinstance(message, ReadProjects) and isinstance(
-                    token, BrowserRequestCredentials
+                    token, BrowserCredentials
                 ):
                     principal = await authenticate_browser_operation(
                         unit.session,
                         token.session_token,
                         None,
-                        self._clock,
                         token_pepper=self._settings.token_pepper.get_secret_value(),
                         project_access=project_access,
                     )
@@ -151,7 +151,7 @@ class PlatformRequestModule(DeveloperPlatformModule):
                     )
                     current = cast(MessageT, replace(message, accesses=accesses))
                 else:
-                    if isinstance(token, BrowserRequestCredentials) and isinstance(
+                    if isinstance(token, BrowserCredentials) and isinstance(
                         message, (ListProjectMembers, *_MUTATING_BROWSER_MESSAGES)
                     ):
                         project_id = message.project_id
@@ -159,7 +159,6 @@ class PlatformRequestModule(DeveloperPlatformModule):
                             unit.session,
                             token.session_token,
                             project_id,
-                            self._clock,
                             token.csrf_token,
                             token.origin,
                             self._settings.browser_allowed_origins,
@@ -182,7 +181,7 @@ class PlatformRequestModule(DeveloperPlatformModule):
                         )
                     else:
                         access = await authenticate_platform_access(
-                            unit.session, token, self._settings, self._clock, project_access
+                            unit.session, token, self._settings, project_access
                         )
                     if isinstance(message, ReadProjects):
                         current = cast(MessageT, replace(message, accesses=(access,)))

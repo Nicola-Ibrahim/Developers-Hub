@@ -1,21 +1,25 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 from dishka import Provider, Scope, make_async_container, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from composition.integrations.providers import IdentityActionIntegrationProvider
-from identity.application.api_tokens.manage_personal_tokens import PersonalTokenHandler
+from identity.application.api_tokens.manage_personal_tokens import CreatePersonalTokenHandler
 from identity.application.authentication.authenticate_session.handler import (
     AuthenticateSessionHandler,
 )
+from identity.application.authentication.logout import handler as logout_module
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
 from identity.application.interfaces.security import TokenGenerator, TokenHasher
 from identity.application.sessions.list_sessions.handler import ListSessionsHandler
+from identity.application.sessions.revoke_all_sessions import handler as revoke_all_sessions_module
 from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand
 from identity.application.sessions.revoke_all_sessions.handler import RevokeAllSessionsHandler
+from identity.application.sessions.revoke_session import handler as revoke_session_module
 from identity.application.sessions.revoke_session.command import RevokeSessionCommand
 from identity.application.sessions.revoke_session.handler import RevokeSessionHandler
 from identity.application.sessions.rotate_csrf.handler import RotateCsrfHandler
@@ -25,7 +29,6 @@ from identity.domain.records import SessionPrincipal
 from identity.domain.value_objects.session_expiry import SessionExpiry
 from identity.infra.composition.action_provider import IdentityActionProvider
 from identity.infra.composition.providers import IdentityTokenScopePolicy
-from shared.infra.clock import Clock
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
 
@@ -49,7 +52,7 @@ def test_session_revocation_is_idempotent_and_keeps_first_timestamp() -> None:
     assert revoked.revoke(revoked_at + timedelta(minutes=1)) is revoked
 
 
-def test_revoke_handler_authorizes_and_persists_for_dispatch_transaction() -> None:
+def test_revoke_handler_authorizes_and_persists_for_dispatch_transaction(monkeypatch) -> None:
     now = datetime(2026, 1, 1, tzinfo=UTC)
     user_id, session_id = uuid4(), uuid4()
     session = Session(
@@ -63,7 +66,7 @@ def test_revoke_handler_authorizes_and_persists_for_dispatch_transaction() -> No
     )
 
     class Authorization:
-        async def authorize_browser_operation(self, *args, **kwargs):
+        async def authorize_session_operation(self, *args, **kwargs):
             return SessionPrincipal(user_id, "dev", uuid4(), None, None, None, (), (), "")
 
         async def validate_csrf(self, token_digest, csrf_digest):
@@ -77,10 +80,17 @@ def test_revoke_handler_authorizes_and_persists_for_dispatch_transaction() -> No
             self.saved = revoked
 
     repository = Authorization()
+
+    class FixedDateTime:
+        @staticmethod
+        def now(tz=None):
+            assert tz is UTC
+            return now
+
+    monkeypatch.setattr(revoke_session_module, "datetime", FixedDateTime)
     handler = RevokeSessionHandler(
         repository,
-        lambda: now,
-        lambda value: f"{value}-digest",
+        SimpleNamespace(digest=lambda value: f"{value}-digest"),
         ("https://portal.example",),
     )
 
@@ -92,13 +102,13 @@ def test_revoke_handler_authorizes_and_persists_for_dispatch_transaction() -> No
     assert repository.saved.revoked_at == now
 
 
-def test_logout_and_revoke_all_authorize_before_writing_in_unit_of_work() -> None:
+def test_logout_and_revoke_all_authorize_before_writing_in_unit_of_work(monkeypatch) -> None:
     now = datetime(2026, 1, 1, tzinfo=UTC)
     user_id = uuid4()
     calls: list[tuple[str, object]] = []
 
     class Authorization:
-        async def authorize_browser_operation(self, *args, **kwargs):
+        async def authorize_session_operation(self, *args, **kwargs):
             calls.append(("authorize", kwargs["lock_for_mutation"]))
             return SessionPrincipal(user_id, "dev", uuid4(), None, None, None, (), (), "")
 
@@ -115,12 +125,21 @@ def test_logout_and_revoke_all_authorize_before_writing_in_unit_of_work() -> Non
 
     repository = Authorization()
 
+    class FixedDateTime:
+        @staticmethod
+        def now(tz=None):
+            assert tz is UTC
+            return now
+
+    monkeypatch.setattr(logout_module, "datetime", FixedDateTime)
+    monkeypatch.setattr(revoke_all_sessions_module, "datetime", FixedDateTime)
+
     def digest(value):
         return f"{value}-digest"
 
-    logout = LogoutHandler(repository, lambda: now, digest, ("https://portal.example",))
+    logout = LogoutHandler(repository, SimpleNamespace(digest=digest), ("https://portal.example",))
     revoke_all = RevokeAllSessionsHandler(
-        repository, lambda: now, digest, ("https://portal.example",)
+        repository, SimpleNamespace(digest=digest), ("https://portal.example",)
     )
 
     async def verify() -> None:
@@ -174,10 +193,6 @@ def test_identity_action_handlers_get_fresh_sessions_and_share_each_uow_session(
             return session_factory
 
         @provide(scope=Scope.APP)
-        def clock(self) -> Clock:
-            return lambda: datetime(2026, 1, 1, tzinfo=UTC)
-
-        @provide(scope=Scope.APP)
         def hasher(self) -> TokenHasher:
             return Hasher()
 
@@ -212,7 +227,7 @@ def test_identity_action_handlers_get_fresh_sessions_and_share_each_uow_session(
                 ListSessionsHandler,
                 RotateCsrfHandler,
                 SelectActiveProjectHandler,
-                PersonalTokenHandler,
+                CreatePersonalTokenHandler,
             ):
                 async with container(scope=Scope.ACTION) as action:
                     handler = await action.get(handler_type, component="identity_action")
@@ -224,7 +239,7 @@ def test_identity_action_handlers_get_fresh_sessions_and_share_each_uow_session(
                         RevokeSessionHandler,
                     ):
                         assert handler.sessions._session is session
-                    elif handler_type is PersonalTokenHandler:
+                    elif handler_type is CreatePersonalTokenHandler:
                         assert handler.sessions._session is session
                         assert handler.tokens._session is session
                     else:
