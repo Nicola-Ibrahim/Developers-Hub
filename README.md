@@ -4,7 +4,7 @@
 
 `Python 3.12` · `FastAPI` · `Next.js` · `PostgreSQL` · `SQLAlchemy` · `Dishka` · `Docker` · `OPA`
 
-[Architecture](#architecture) · [Engineering decisions](#engineering-decisions) · [Run locally](#run-locally) · [Technical deep dive](docs/architecture.md)
+[Architecture](#architecture) · [Engineering decisions](#engineering-decisions) · [Run locally](#run-locally) · [Backend](backend/README.md) · [Frontend](frontend/README.md) · [Technical deep dive](docs/architecture.md)
 
 ## Why I built it
 
@@ -24,79 +24,41 @@ A developer should not need to repeat repository setup, database configuration, 
 
 ## Architecture
 
-### C4 Level 1: System context
+### C4 Level 1 — System context
 
-*Who uses the platform, and which external systems does it interact with?*
+Who uses the platform and which external systems it interacts with.
 
-```mermaid
-flowchart LR
-    Dev["Developer<br/>Requests apps and infrastructure"]
-    Operator["Platform operator<br/>Configures approved resources"]
-    Hub["Developers-Hub<br/>Internal developer platform"]
-    GitHub["GitHub<br/>Repositories and webhooks"]
-    Docker["Docker Engine<br/>Local infrastructure runtime"]
+![Developers-Hub system context: developers, operator, platform, GitHub and Docker](docs/c4/system-context.svg)
 
-    Dev -->|Uses workspace and API| Hub
-    Operator -->|Configures and operates| Hub
-    Hub -.->|Optional repository integration| GitHub
-    Hub -->|Provisions and manages local workloads| Docker
-```
+[Editable draw.io source](docs/c4/system-context.drawio)
 
-### C4 Level 2: Containers
+### C4 Level 2 — Containers
 
-*The separately running applications and data stores that make up Developers-Hub.*
+The independently running applications and data stores. The frontend and backend have distinct runtime boundaries, but the backend itself remains a modular monolith.
 
-```mermaid
-flowchart TB
-    Dev["Developer<br/>Browser"]
-    Docker["Docker Engine<br/>External local runtime"]
-    GitHub["GitHub<br/>Optional external service"]
+![Developers-Hub container architecture](docs/c4/containers.svg)
 
-    subgraph Hub["Developers-Hub · system boundary"]
-        UI["Developer dashboard<br/>Next.js"]
-        API["Control-plane API<br/>FastAPI · Python"]
-        OPA["Policy service<br/>Open Policy Agent"]
-        DB[("Control-plane database<br/>PostgreSQL")]
-        ResourceWorker["Resource worker<br/>Provision and clean up databases"]
-        DeliveryWorker["Delivery worker<br/>Execute application delivery steps"]
-    end
+[Editable draw.io source](docs/c4/containers.drawio)
 
-    Dev -->|Uses| UI
-    UI -->|HTTP / JSON| API
-    API -->|Evaluates identity policies| OPA
-    API -->|Stores users, projects, jobs, audit| DB
-    ResourceWorker -->|Claims and updates operations| DB
-    DeliveryWorker -->|Claims and updates delivery steps| DB
-    ResourceWorker -->|Manages databases| Docker
-    DeliveryWorker -->|Manages applications| Docker
-    DeliveryWorker -.->|Repository workflows| GitHub
-```
+**Inside the API:** `Identity` owns users, credentials, API tokens and sessions; `DeveloperPlatform` owns project access, resources and delivery. They are bounded contexts within one application, not separate microservices. Background workers execute external operations separately and use durable PostgreSQL state.
 
-**Inside the API:** `Identity` owns users, credentials, and sessions; `DeveloperPlatform` owns project access, resources, and delivery. They are **bounded contexts within one modular monolith**, not separate microservices. [Explore the Level 3 component diagram](docs/architecture.md#c4-level-3-control-plane-api-components).
+### Architecture guide
+
+| View | What it explains |
+| --- | --- |
+| [Backend documentation and diagrams](backend/docs/README.md) | C4 components, provisioning, delivery, and optional server deployment |
+| [Frontend documentation and diagrams](frontend/docs/README.md) | C4 components and frontend hosting alternatives |
+| [Backend operations](backend/README.md#aws-server-deployment) | Optional Terraform-defined EC2 host; illustrative runtime placement |
+| [Image publishing](backend/README.md#image-publishing) | CI, immutable ECR images and the reserved deployment path |
+| [Architecture deep dive](docs/architecture.md) | Transaction semantics, source entry points and recovery |
 
 ### A provisioning request, end to end
 
-```mermaid
-sequenceDiagram
-    actor Developer
-    participant API as FastAPI API
-    participant DB as PostgreSQL
-    participant Worker as Resource worker
-    participant Docker as Docker Engine
+![Durable provisioning workflow](backend/docs/diagrams/provisioning.svg)
 
-    Developer->>API: Request temporary database
-    API->>DB: Validate and persist resource + operation
-    DB-->>API: Commit
-    API-->>Developer: 202 Accepted + operation ID
-    Worker->>DB: Claim job (short transaction)
-    Worker->>Docker: Provision outside the transaction
-    Docker-->>Worker: Outcome
-    Worker->>DB: Commit status / retry details
-    Developer->>API: GET operation status
-    API-->>Developer: Committed state
-```
+[Editable draw.io source](backend/docs/diagrams/provisioning.drawio)
 
-**The principle:** accept work durably, perform external effects outside database transactions, and recover through explicit job state rather than holding an HTTP request open.
+**The principle:** accept work durably, perform external effects outside database transactions, and recover through explicit job state rather than holding an HTTP request open. Progress is exposed through authorized status reads; SSE is planned.
 
 ## Engineering decisions
 
@@ -107,6 +69,7 @@ sequenceDiagram
 | **PostgreSQL-backed durable jobs** | Survive retries and worker restarts using claim tokens, leases, idempotency, and recorded outcomes. |
 | **Short transaction boundaries** | Commit the intent before provisioning; do not hold locks during Docker or GitHub operations. |
 | **Defense-in-depth access** | Project-scoped permissions, HttpOnly sessions, CSRF checks, policy evaluation, and audit events. |
+| **Independent frontend hosting** | Preserve the server-side API proxy and allow hosting decisions to evolve independently of the backend. |
 
 ## Run locally
 
@@ -118,13 +81,13 @@ cd Developers-Hub
 ./scripts/dev.sh up
 ```
 
-The script creates local development configuration and starts the **core services**: dashboard, API, PostgreSQL, OPA, and migrations.
+The script creates local development configuration and starts the **core services**: dashboard, API, policy service, PostgreSQL and migrations.
 
 - **Dashboard:** <http://127.0.0.1:3000> (includes a synthetic guest preview)
 - **API docs:** <http://127.0.0.1:8000/docs>
 - **Readiness:** <http://127.0.0.1:8000/health/ready>
 
-> **Development status:** This is an active prototype, not a production deployment. Worker processes and real provisioning require additional operator configuration; the current `main` branch also has outstanding CI failures. The guest preview does not provision real infrastructure. SSE progress streaming and cloud providers are planned work.
+> **Development status:** Active prototype, not a production deployment. Workers and real provisioning require operator configuration. The guest preview does not provision infrastructure. SSE progress streaming and cloud providers are planned. The reviewed README reports outstanding CI failures; see [CI](.github/workflows/platform-ci.yml) for checks. AWS hosting definitions are optional, not evidence of a running production environment.
 
 To inspect or stop local services:
 
@@ -138,10 +101,10 @@ To inspect or stop local services:
 | Interested in… | Start here |
 | --- | --- |
 | Domain boundaries and transaction orchestration | [Architecture deep dive](docs/architecture.md) |
-| Authentication, sessions, and authorization | [`backend/src/identity`](backend/src/identity/) |
-| Project resources, application delivery, and workers | [`backend/src/devops_platform`](backend/src/devops_platform/) |
+| Authentication, sessions and authorization | [`backend/src/identity`](backend/src/identity/) |
+| Project resources, application delivery and workers | [`backend/src/devops_platform`](backend/src/devops_platform/) |
 | HTTP integration and DI composition | [`backend/src/api`](backend/src/api/) · [`backend/src/composition`](backend/src/composition/) |
 | Developer dashboard | [`frontend/src/features`](frontend/src/features/) |
 | Infrastructure configuration | [`ops`](ops/) · [Terraform notes](ops/hosting/terraform/README.md) |
 
-**More detail:** [Backend setup](backend/README.md) · [Frontend setup](frontend/README.md) · [C4 component and lifecycle diagrams](docs/architecture.md)
+Cross-system diagrams remain in [`docs/`](docs/README.md). Backend and frontend diagrams are maintained with their component documentation in [`backend/docs/`](backend/docs/README.md) and [`frontend/docs/`](frontend/docs/README.md).

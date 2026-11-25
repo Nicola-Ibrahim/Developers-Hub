@@ -6,6 +6,7 @@ from dishka import Provider, Scope, make_async_container, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from composition.integrations.providers import IdentityActionIntegrationProvider
+from identity.application.api_tokens.manage_personal_tokens import PersonalTokenHandler
 from identity.application.authentication.authenticate_session.handler import (
     AuthenticateSessionHandler,
 )
@@ -23,6 +24,7 @@ from identity.domain.aggregates.session import Session
 from identity.domain.records import SessionPrincipal
 from identity.domain.value_objects.session_expiry import SessionExpiry
 from identity.infra.composition.action_provider import IdentityActionProvider
+from identity.infra.composition.providers import IdentityTokenScopePolicy
 from shared.infra.clock import Clock
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
@@ -191,6 +193,10 @@ def test_identity_action_handlers_get_fresh_sessions_and_share_each_uow_session(
         def settings(self) -> Settings:
             return config
 
+        @provide(scope=Scope.APP)
+        def token_scope_policy(self) -> IdentityTokenScopePolicy:
+            return IdentityTokenScopePolicy(("catalog:read",))
+
     async def verify() -> None:
         container = make_async_container(
             RootProvider(),
@@ -206,6 +212,7 @@ def test_identity_action_handlers_get_fresh_sessions_and_share_each_uow_session(
                 ListSessionsHandler,
                 RotateCsrfHandler,
                 SelectActiveProjectHandler,
+                PersonalTokenHandler,
             ):
                 async with container(scope=Scope.ACTION) as action:
                     handler = await action.get(handler_type, component="identity_action")
@@ -217,11 +224,14 @@ def test_identity_action_handlers_get_fresh_sessions_and_share_each_uow_session(
                         RevokeSessionHandler,
                     ):
                         assert handler.sessions._session is session
+                    elif handler_type is PersonalTokenHandler:
+                        assert handler.sessions._session is session
+                        assert handler.tokens._session is session
                     else:
                         assert handler.repository._session is session
                     assert unit.session is session
-            assert len(created_sessions) == 7
-            assert len({id(session) for session in created_sessions}) == 7
+            assert len(created_sessions) == 8
+            assert len({id(session) for session in created_sessions}) == 8
         finally:
             await container.close()
 

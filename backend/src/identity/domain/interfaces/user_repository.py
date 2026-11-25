@@ -4,10 +4,25 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from identity.domain.records import AccountCredentials, AccountSessionDetails
+from identity.domain.records import (
+    AccountCredentials,
+    AccountProfile,
+    AccountSessionDetails,
+    SecurityActivity,
+)
 
 
 class UserRepository(Protocol):
+    async def load_profile(self, user_id: UUID) -> AccountProfile | None: ...
+
+    async def update_profile(
+        self, *, user_id: UUID, display_name: str | None, now: datetime
+    ) -> AccountProfile | None: ...
+
+    async def list_security_history(
+        self, user_id: UUID, *, limit: int
+    ) -> tuple[SecurityActivity, ...]: ...
+
     async def issue_password_setup(
         self,
         *,

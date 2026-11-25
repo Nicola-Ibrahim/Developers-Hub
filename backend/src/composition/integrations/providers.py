@@ -19,6 +19,7 @@ from devops_platform.application.resource_management.catalog.catalog import Appr
 from devops_platform.domain.interfaces.project_access_directory import ProjectAccessDirectory
 from identity.application.interfaces.browser_transactions import BrowserTransaction
 from identity.application.interfaces.token_operations import ApiTokenTransaction
+from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.interfaces.project_access import IdentityProjectAccess
 from identity.infra.composition.api_token_transactions import SqlAlchemyApiTokenTransaction
 from identity.infra.composition.browser_transactions import SqlAlchemyIdentityTransaction
@@ -91,3 +92,7 @@ class IdentityActionIntegrationProvider(Provider):
     @provide(scope=Scope.ACTION, provides=IdentityProjectAccess)
     def identity_project_access(self, session: AsyncSession) -> IdentityProjectAccess:
         return identity_project_access_for_session(session)
+
+    @provide(scope=Scope.ACTION, provides=ApiTokenRepository)
+    def api_token_repository(self, session: AsyncSession) -> ApiTokenRepository:
+        return api_token_repository_for_session(session)

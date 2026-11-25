@@ -13,6 +13,22 @@ decision := {"allow": true, "policy_revision": "identity-v1"} if {
 decision := {"allow": true, "policy_revision": "identity-v1"} if {
 	is_string(input.subject.id)
 	input.subject.id != ""
+	input.action in {"identity.tokens.read", "identity.tokens.write"}
+	input.resource.kind == "token"
+	input.subject.id == input.resource.owner_id
+}
+
+decision := {"allow": true, "policy_revision": "identity-v1"} if {
+	is_string(input.subject.id)
+	input.subject.id != ""
+	input.action in {"identity.profile.read", "identity.profile.update", "identity.security_history.read"}
+	input.resource.kind == "profile"
+	input.subject.id == input.resource.owner_id
+}
+
+decision := {"allow": true, "policy_revision": "identity-v1"} if {
+	is_string(input.subject.id)
+	input.subject.id != ""
 	input.action == "identity.project.select"
 	input.resource.kind == "session"
 	input.subject.id == input.resource.owner_id

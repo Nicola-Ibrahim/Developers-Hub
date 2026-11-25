@@ -10,7 +10,7 @@ from pydantic import AliasChoices, Field, SecretStr, field_validator, model_vali
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
-SCHEMA_REVISION = "0001_initial_schema"
+SCHEMA_REVISION = "0003_personal_tokens"
 
 
 class DatabaseSettings(BaseSettings):

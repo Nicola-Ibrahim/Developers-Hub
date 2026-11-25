@@ -11,11 +11,19 @@ from identity.application.api_tokens.authenticate_api_token.handler import (
     AuthenticateApiTokenHandler,
 )
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
+from identity.application.api_tokens.personal_token_messages import (
+    CreatePersonalTokenCommand,
+    ListPersonalTokensQuery,
+    RevokePersonalTokenCommand,
+    RotatePersonalTokenCommand,
+)
 from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.handler import LoginHandler
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
+from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery
+from identity.application.profile.update_profile import UpdateProfileCommand
 from identity.application.sessions.list_sessions.query import ListSessionsQuery
 from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand
 from identity.application.sessions.revoke_all_sessions.handler import RevokeAllSessionsHandler
@@ -53,11 +61,18 @@ def test_identity_messages_have_explicit_complete_registrations() -> None:
         RevokeAllSessionsCommand,
         RevokeSessionCommand,
         ChangePasswordCommand,
+        UpdateProfileCommand,
+        CreatePersonalTokenCommand,
+        RotatePersonalTokenCommand,
+        RevokePersonalTokenCommand,
     }
     assert set(IDENTITY_HANDLER_REGISTRY.queries) == {
         AuthenticateApiTokenQuery,
         AuthenticateSessionQuery,
         ListSessionsQuery,
+        ProfileQuery,
+        SecurityHistoryQuery,
+        ListPersonalTokensQuery,
     }
 
 

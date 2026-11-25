@@ -3,12 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const allowedMethods = new Set(["GET", "POST", "PUT", "DELETE"]);
+const allowedMethods = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 const forwardedHeaders = ["accept", "content-type", "cookie", "idempotency-key", "origin", "referer", "x-csrf-token", "x-request-id", "x-project-id"];
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   if (!allowedMethods.has(request.method)) {
-    return NextResponse.json({ detail: "Method not allowed" }, { status: 405, headers: { Allow: "GET, POST, PUT, DELETE", "Cache-Control": "no-store" } });
+    return NextResponse.json({ detail: "Method not allowed" }, { status: 405, headers: { Allow: "GET, POST, PUT, PATCH, DELETE", "Cache-Control": "no-store" } });
   }
 
   const configured = process.env.BACKEND_URL;
@@ -72,3 +72,4 @@ export const GET = proxy;
 export const POST = proxy;
 export const DELETE = proxy;
 export const PUT = proxy;
+export const PATCH = proxy;

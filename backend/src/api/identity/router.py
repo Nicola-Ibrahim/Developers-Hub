@@ -15,7 +15,9 @@ from api.identity.authentication.routes import router as authentication_router
 from api.identity.authentication.schemas import ProjectBody
 from api.identity.authorization import require_identity_permission
 from api.identity.principal.routes import router as principal_router
+from api.identity.profile.routes import router as profile_router
 from api.identity.sessions.routes import router as sessions_router
+from api.identity.tokens.routes import router as tokens_router
 from api.platform.projects.memberships import router as memberships_router
 from identity.application.interfaces.authorization import AuthorizationDecisionPort
 from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
@@ -29,6 +31,13 @@ _IDENTITY_ACTIONS = {
     "sessions": "identity.sessions.read",
     "revoke_session": "identity.sessions.revoke",
     "change_password": "identity.password.change",
+    "get_profile": "identity.profile.read",
+    "patch_profile": "identity.profile.update",
+    "security_history": "identity.security_history.read",
+    "list_tokens": "identity.tokens.read",
+    "create_token": "identity.tokens.write",
+    "rotate_token": "identity.tokens.write",
+    "revoke_token": "identity.tokens.write",
     "list_project_members": "identity.members.read",
     "set_project_member": "identity.members.write",
     "remove_project_member": "identity.members.write",
@@ -73,9 +82,15 @@ async def identity_route_permission(
         authorizer=authorizer,
         session_token=require_cookie_session(credentials),
         action=action,
-        resource_kind="project_membership"
-        if "members" in route_name or "member" in route_name
-        else "session",
+        resource_kind=(
+            "project_membership"
+            if "members" in route_name or "member" in route_name
+            else "profile"
+            if route_name in {"get_profile", "patch_profile", "security_history"}
+            else "token"
+            if route_name in {"list_tokens", "create_token", "rotate_token", "revoke_token"}
+            else "session"
+        ),
         resource_id=session_id,
         project_id=project_id,
     )
@@ -87,6 +102,8 @@ for feature_router in (
     authentication_router,
     sessions_router,
     memberships_router,
+    profile_router,
+    tokens_router,
 ):
     router.include_router(feature_router, dependencies=[Depends(identity_route_permission)])
 router.include_router(principal_router)

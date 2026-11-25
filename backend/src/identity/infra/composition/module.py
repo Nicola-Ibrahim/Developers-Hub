@@ -11,6 +11,13 @@ from identity.application.api_tokens.authenticate_api_token.handler import (
     AuthenticateApiTokenHandler,
 )
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
+from identity.application.api_tokens.manage_personal_tokens import PersonalTokenHandler
+from identity.application.api_tokens.personal_token_messages import (
+    CreatePersonalTokenCommand,
+    ListPersonalTokensQuery,
+    RevokePersonalTokenCommand,
+    RotatePersonalTokenCommand,
+)
 from identity.application.authentication.authenticate_session.handler import (
     AuthenticateSessionHandler,
 )
@@ -19,6 +26,9 @@ from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.handler import LoginHandler
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
+from identity.application.profile.handlers import ProfileHandler, SecurityHistoryHandler
+from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery
+from identity.application.profile.update_profile import UpdateProfileCommand
 from identity.application.sessions.list_sessions.handler import ListSessionsHandler
 from identity.application.sessions.list_sessions.query import ListSessionsQuery
 from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand
@@ -48,11 +58,18 @@ IDENTITY_HANDLER_REGISTRY = HandlerRegistry(
         (RevokeAllSessionsCommand, RevokeAllSessionsHandler),
         (RevokeSessionCommand, RevokeSessionHandler),
         (ChangePasswordCommand, ChangePasswordHandler),
+        (UpdateProfileCommand, ProfileHandler),
+        (CreatePersonalTokenCommand, PersonalTokenHandler),
+        (RotatePersonalTokenCommand, PersonalTokenHandler),
+        (RevokePersonalTokenCommand, PersonalTokenHandler),
     ),
     queries=(
         (AuthenticateApiTokenQuery, AuthenticateApiTokenHandler),
         (AuthenticateSessionQuery, AuthenticateSessionHandler),
         (ListSessionsQuery, ListSessionsHandler),
+        (ProfileQuery, ProfileHandler),
+        (SecurityHistoryQuery, SecurityHistoryHandler),
+        (ListPersonalTokensQuery, PersonalTokenHandler),
     ),
     required_commands=(
         LoginCommand,
@@ -62,11 +79,18 @@ IDENTITY_HANDLER_REGISTRY = HandlerRegistry(
         RevokeAllSessionsCommand,
         RevokeSessionCommand,
         ChangePasswordCommand,
+        UpdateProfileCommand,
+        CreatePersonalTokenCommand,
+        RotatePersonalTokenCommand,
+        RevokePersonalTokenCommand,
     ),
     required_queries=(
         AuthenticateApiTokenQuery,
         AuthenticateSessionQuery,
         ListSessionsQuery,
+        ProfileQuery,
+        SecurityHistoryQuery,
+        ListPersonalTokensQuery,
     ),
 )
 

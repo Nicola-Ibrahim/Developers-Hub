@@ -21,6 +21,16 @@ class ApiTokenStatus:
 
 
 @dataclass(frozen=True)
+class PersonalApiToken:
+    token_id: UUID
+    name: str
+    project_id: UUID
+    scopes: tuple[str, ...]
+    expires_at: datetime
+    revoked_at: datetime | None
+
+
+@dataclass(frozen=True)
 class ApiTokenAuditEvent:
     actor_id: UUID | None
     project_id: UUID
@@ -52,6 +62,21 @@ class AccountSessionDetails:
     user_name: str
     active: bool
     credential_version: int
+
+
+@dataclass(frozen=True)
+class AccountProfile:
+    user_id: UUID
+    user_name: str
+    display_name: str | None
+
+
+@dataclass(frozen=True)
+class SecurityActivity:
+    id: UUID
+    action: str
+    outcome: str
+    created_at: datetime
 
 
 @dataclass(frozen=True)

@@ -4,9 +4,7 @@
 
 `Next.js 16` · `React 19` · `TypeScript` · `App Router` · `CSS`
 
-[Project overview](../README.md) · [Backend API](../backend/README.md) · [C4 architecture](../docs/architecture.md)
-
----
+[Project overview](../README.md) · [Frontend diagrams](docs/README.md) · [Backend API](../backend/README.md) · [System architecture](../docs/architecture.md)
 
 ## What developers see
 
@@ -21,22 +19,13 @@
 
 ## Frontend architecture
 
-The browser accesses FastAPI through a **same-origin Next.js API proxy**. Next.js owns presentation and session-aware navigation; the backend remains responsible for authorization and infrastructure state.
+### C4 Level 3 — Dashboard components
 
-```mermaid
-flowchart LR
-    Browser["Browser"] --> Pages["Next.js App Router"]
+The browser accesses FastAPI through a **same-origin Next.js API proxy**. Next.js owns presentation and session-aware navigation; FastAPI owns authorization and infrastructure state.
 
-    subgraph UI["Dashboard"]
-        Pages --> Workspace["Workspace state / active project"]
-        Workspace --> Features["Resources, applications, identity"]
-        Features --> Proxy["Same-origin API proxy"]
-    end
+![Next.js dashboard component architecture](docs/diagrams/frontend-components.svg)
 
-    Proxy --> API["FastAPI backend"]
-    API --> DB[("PostgreSQL")]
-    API --> Policy["OPA authorization"]
-```
+[Editable draw.io source](docs/diagrams/frontend-components.drawio)
 
 ### Key UI boundaries
 
@@ -45,6 +34,27 @@ flowchart LR
 - **Secrets:** resource connection credentials are requested only when the user opens the connection view.
 - **Permissions:** the UI reflects allowed operations but never replaces backend authorization checks.
 - **Progress:** current resource/application views use periodic status refreshes. **SSE-only progress is planned**, not implemented.
+
+### Server-side API proxy
+
+The dynamic `src/app/api/v1/[...path]/route.ts` route runs in Node.js. It uses a server-only `BACKEND_URL`, checks allowed methods, validates origins for mutations, requires a CSRF header except for login, forwards selected headers/cookies, and propagates upstream responses without caching authenticated data. The backend remains responsible for validating sessions and permissions.
+
+## Frontend hosting
+
+The frontend can be deployed separately from the FastAPI backend. The existing Dockerfile builds a Next.js standalone Node.js runtime, not a static site.
+
+![Independent frontend hosting alternatives](docs/diagrams/frontend-hosting.svg)
+
+[Editable draw.io source](docs/diagrams/frontend-hosting.drawio) · [Backend hosting](../backend/README.md#aws-server-deployment)
+
+| Option | Fit for current code |
+| --- | --- |
+| **Next.js standalone server** | Closest fit. Deploy as a separate Node.js process/container, on AWS or another host. Configure HTTPS, backend connectivity and trusted origins. |
+| **Cloudflare Workers** | Proposed. Verify Next.js adapter/runtime support, dynamic proxy, cookie forwarding, request origin and streaming behavior before adopting. |
+| **S3 + CloudFront** | Proposed static option. S3 cannot execute the dynamic Next.js proxy; requires static export compatibility and an API/authentication redesign. |
+| **Cloudflare Pages (static)** | Same constraint as static S3 hosting; requires refactoring or an appropriate separate server/edge proxy. |
+
+Choose one frontend deployment, not all of them. No alternative is claimed to be live. Keep browser-facing authentication, CSRF and backend access boundaries under review when changing hosts. The proxy currently uses a 30-second upstream timeout; future SSE would require separate streaming design and testing.
 
 ## Run locally
 
@@ -85,8 +95,6 @@ npm run build
 node --test tests/client.test.mjs
 ```
 
-**Known issue in the reviewed revision:** components import `src/lib/api/client` and `src/lib/api/pagination`, but those shared modules are missing from the committed tree. Restore them before expecting the TypeScript check or build to pass.
-
----
+**Known issue recorded in the existing README:** components import `src/lib/api/client` and `src/lib/api/pagination`, but those shared modules were missing from the reviewed tree. Restore or verify them before expecting the TypeScript check or build to pass.
 
 For server-side contracts, security and provisioning workflows, see the [Backend README](../backend/README.md).

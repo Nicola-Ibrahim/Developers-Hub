@@ -15,7 +15,10 @@ class IdentityContainer:
     token_scopes: tuple[str, ...]
 
     def providers(self) -> tuple[Provider, ...]:
-        return (IdentityProvider(), IdentityActionProvider(component="identity_action"))
+        return (
+            IdentityProvider(),
+            IdentityActionProvider(component="identity_action"),
+        )
 
     def context(self) -> dict[type[object], object]:
         return {IdentityTokenScopePolicy: IdentityTokenScopePolicy(self.token_scopes)}

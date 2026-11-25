@@ -10,10 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from identity.domain.errors import IdentityValidationError
 from identity.domain.interfaces.project_access import IdentityProjectAccess
 from identity.domain.interfaces.user_repository import UserRepository
-from identity.domain.records import AccountCredentials, AccountSessionDetails, MembershipDetails
+from identity.domain.records import (
+    AccountCredentials,
+    AccountProfile,
+    AccountSessionDetails,
+    MembershipDetails,
+    SecurityActivity,
+)
 from identity.infra.persistence.models.activity import IdentityActivityRow
 from identity.infra.persistence.models.session import BrowserLoginThrottleRow
 from identity.infra.persistence.models.user import InternalUserRow, PasswordSetupRow
+from shared.infra.persistence.audit import AuditEvent
 
 _THROTTLE_WINDOW = timedelta(minutes=15)
 _MAX_FAILURES = 6
@@ -26,6 +33,56 @@ class SQLAlchemyUserRepository(UserRepository):
     def __init__(self, session: AsyncSession, project_access: IdentityProjectAccess) -> None:
         self._session = session
         self._project_access = project_access
+
+    async def load_profile(self, user_id: UUID) -> AccountProfile | None:
+        user = await self._session.get(InternalUserRow, user_id)
+        if user is None:
+            return None
+        return AccountProfile(user.id, user.name, user.display_name)
+
+    async def update_profile(
+        self, *, user_id: UUID, display_name: str | None, now: datetime
+    ) -> AccountProfile | None:
+        user = await self._session.scalar(
+            select(InternalUserRow).where(InternalUserRow.id == user_id).with_for_update()
+        )
+        if user is None or not user.active:
+            return None
+        user.display_name = display_name
+        await self._record_activity(user_id, user_id, None, "profile_updated", "succeeded", now)
+        await self._session.flush()
+        return AccountProfile(user.id, user.name, user.display_name)
+
+    async def list_security_history(
+        self, user_id: UUID, *, limit: int
+    ) -> tuple[SecurityActivity, ...]:
+        identity_rows = (
+            await self._session.execute(
+                select(
+                    IdentityActivityRow.id,
+                    IdentityActivityRow.action,
+                    IdentityActivityRow.outcome,
+                    IdentityActivityRow.created_at,
+                )
+                .where(IdentityActivityRow.subject_id == user_id)
+                .order_by(IdentityActivityRow.created_at.desc(), IdentityActivityRow.id.desc())
+                .limit(limit)
+            )
+        ).all()
+        token_rows = (
+            await self._session.execute(
+                select(AuditEvent.id, AuditEvent.action, AuditEvent.outcome, AuditEvent.created_at)
+                .where(
+                    AuditEvent.actor_id == user_id,
+                    AuditEvent.action.in_(("token_issued", "token_revoked", "token_rotated")),
+                )
+                .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+                .limit(limit)
+            )
+        ).all()
+        activities = [SecurityActivity(*row) for row in (*identity_rows, *token_rows)]
+        activities.sort(key=lambda item: (item.created_at, item.id.hex), reverse=True)
+        return tuple(activities[:limit])
 
     async def _memberships(self, user_id: UUID) -> tuple[MembershipDetails, ...]:
         rows = await self._project_access.project_memberships(user_id)

@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from api.app import create_app
 from api.settings.config import BrowserCookiePolicy
+from identity.application.api_tokens.personal_token_messages import CreatePersonalTokenCommand
 from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.result import LoginResult
@@ -22,7 +23,7 @@ from identity.application.interfaces.authorization import (
 )
 from identity.application.interfaces.browser_tokens import BrowserSessionTokenVerifier
 from identity.application.interfaces.dispatch import IdentityModule
-from identity.domain.records import SessionPrincipal
+from identity.domain.records import PersonalApiToken, SessionPrincipal
 from identity.infra.security.browser_tokens import JwtBrowserSessionTokens
 
 USER, PROJECT, SESSION = uuid4(), uuid4(), uuid4()
@@ -44,6 +45,15 @@ class Identity:
         self.commands.append(command)
         if isinstance(command, LogoutCommand):
             return None
+        if isinstance(command, CreatePersonalTokenCommand):
+            return PersonalApiToken(
+                uuid4(),
+                command.name,
+                PROJECT,
+                command.scopes,
+                datetime.now(UTC) + timedelta(hours=command.hours),
+                None,
+            ), "one-time-secret"
         assert isinstance(command, LoginCommand)
         principal = SessionPrincipal(USER, "alice", SESSION, None, None, None, (), (), "csrf")
         return LoginResult(
@@ -94,6 +104,25 @@ class Bindings(Provider):
 
 
 CASES = [
+    ("GET", "/api/v1/me/tokens", None, "identity.tokens.read"),
+    (
+        "POST",
+        "/api/v1/me/tokens",
+        {"name": "deploy", "scopes": ["catalog:read"], "hours": 2},
+        "identity.tokens.write",
+    ),
+    (
+        "POST",
+        f"/api/v1/me/tokens/{SESSION}/rotate",
+        None,
+        "identity.tokens.write",
+    ),
+    (
+        "DELETE",
+        f"/api/v1/me/tokens/{SESSION}",
+        None,
+        "identity.tokens.write",
+    ),
     ("GET", "/api/v1/me/browser", None, "identity.sessions.read"),
     ("GET", "/api/v1/me/sessions", None, "identity.sessions.read"),
     ("DELETE", f"/api/v1/me/sessions/{SESSION}", None, "identity.sessions.revoke"),
@@ -134,6 +163,9 @@ def test_policy_denial_blocks_every_protected_identity_action(
         assert len(policy.calls) == 1
         assert policy.calls[0].action == action
         assert policy.calls[0].subject_id == USER
+        if "/me/tokens" in path:
+            assert policy.calls[0].resource_kind == "token"
+            assert policy.calls[0].owner_id == USER
         if "/projects/" in path or path == "/api/v1/auth/project":
             assert identity.queries[0].project_id == PROJECT
             assert policy.calls[0].subject_project_id == PROJECT
@@ -169,6 +201,28 @@ def test_allowed_logout_dispatches_after_policy_check():
         assert len(identity.commands) == 1
         assert isinstance(identity.commands[0], LogoutCommand)
         assert len(policy.calls) == 1
+    finally:
+        asyncio.run(container.close())
+
+
+def test_personal_token_route_runs_router_policy_preflight_then_dispatches_message():
+    identity, policy = Identity(), Policy(allowed=True)
+    container = make_async_container(Bindings(identity, policy), FastapiProvider())
+    try:
+        with TestClient(create_app(container=container)) as client:
+            client.cookies.set("devops_session", "private-session")
+            response = client.post(
+                "/api/v1/me/tokens",
+                json={"name": "deploy", "scopes": ["catalog:read"], "hours": 2},
+                headers={"X-CSRF-Token": "csrf", "Origin": "http://localhost:3000"},
+            )
+        assert response.status_code == 200
+        assert response.json()["secret"] == "one-time-secret"
+        assert len(policy.calls) == 1
+        assert policy.calls[0].action == "identity.tokens.write"
+        assert policy.calls[0].resource_kind == "token"
+        assert policy.calls[0].owner_id == USER
+        assert isinstance(identity.commands[-1], CreatePersonalTokenCommand)
     finally:
         asyncio.run(container.close())
 

@@ -4,9 +4,7 @@
 
 `Python 3.12+` · `FastAPI` · `SQLAlchemy 2` · `PostgreSQL` · `Dishka` · `OPA` · `Docker`
 
-[Project overview](../README.md) · [C4 architecture](../docs/architecture.md) · [Frontend](../frontend/README.md)
-
----
+[Project overview](../README.md) · [Backend diagrams](docs/README.md) · [System architecture](../docs/architecture.md) · [Frontend](../frontend/README.md)
 
 ## What it does
 
@@ -23,36 +21,27 @@ The API turns a developer request into an **authorized, durable operation**. Pro
 
 ### C4 Level 3 — API components
 
-The two bounded contexts live in **one modular monolith**, not separate microservices. The resource and delivery workers run as independent processes.
+The two bounded contexts live in **one modular monolith**, not separate microservices. Resource and delivery workers run as independent processes outside the API process.
 
-```mermaid
-flowchart TB
-    Client["Dashboard / API client"] --> Routes["FastAPI routes"]
+![Backend C4 component architecture](docs/diagrams/backend-components.svg)
 
-    subgraph API["Control-plane API"]
-        Routes --> Boundary["HTTP composition / transaction boundary"]
-        Boundary --> Identity["Identity module"]
-        Boundary --> Platform["DeveloperPlatform dispatcher"]
-        Identity --> IHandlers["Identity use cases"]
-        Platform --> PHandlers["Platform use cases"]
-        IHandlers --> Persistence["SQLAlchemy repositories"]
-        PHandlers --> Domain["Domain aggregates and policies"]
-        Domain --> Persistence
-        DI["Dishka scopes"] -.-> Boundary
-        DI -.-> Persistence
-    end
+[Editable draw.io source](docs/diagrams/backend-components.drawio) · [Container context](../docs/c4/containers.svg)
 
-    Persistence --> DB[("PostgreSQL")]
-    Boundary --> OPA["OPA policy service"]
-    DB --> ResourceWorker["Resource worker"]
-    DB --> DeliveryWorker["Delivery worker"]
-    ResourceWorker --> Docker["Local Docker runtime"]
-    DeliveryWorker --> Docker
-```
+| Boundary | Responsibility |
+| --- | --- |
+| Identity | Accounts, credentials, sessions, API tokens and identity policies |
+| DeveloperPlatform | Projects, membership, resource lifecycle, application delivery |
+| API composition | HTTP mapping, identity and platform integration, transaction orchestration |
+| Infrastructure adapters | SQLAlchemy repositories and projections, OPA policy evaluation, runtime providers |
+| Workers | Claim durable jobs, perform external effects, persist outcomes |
 
-**Transaction boundaries:** ordinary Platform operations use a Dishka `ACTION` scope and short SQLAlchemy transaction. Specialized Identity workflows manage multiple phases where needed. External provider calls run **outside** the database transaction.
+**Transaction boundaries:** ordinary Platform operations use a Dishka `ACTION` scope and short SQLAlchemy transaction. Specialized Identity workflows manage multiple phases where needed. External provider calls run **outside** the database transaction. The diagram shows logical components, not one universal handler pipeline.
 
 ### Durable provisioning
+
+![Durable provisioning workflow](docs/diagrams/provisioning.svg)
+
+[Editable draw.io source](docs/diagrams/provisioning.drawio)
 
 ```mermaid
 sequenceDiagram
@@ -61,7 +50,6 @@ sequenceDiagram
     participant DB as PostgreSQL
     participant Worker as Resource worker
     participant Docker as Docker runtime
-
     Developer->>API: POST /api/v1/resources
     API->>DB: Authorize, reserve quota, record operation
     DB-->>API: Commit
@@ -74,7 +62,29 @@ sequenceDiagram
     API-->>Developer: Authorized status
 ```
 
-The worker's durable operation record makes retries and recovery possible after a crash. **SSE progress streaming is planned**, not implemented in the reviewed code.
+The durable operation record makes retries and recovery possible after a crash. **SSE progress streaming is planned**, not implemented in the reviewed code.
+
+## AWS server deployment
+
+The repository includes an optional Terraform target for a single Ubuntu EC2 Docker host in a public subnet. Ansible handles host setup and Nginx/TLS. The diagram illustrates how the backend could be placed there; it is not a deployed runtime contract or a claim of production readiness.
+
+![AWS backend server deployment](docs/diagrams/aws-backend.svg)
+
+[Editable draw.io source](docs/diagrams/aws-backend.drawio) · [Terraform hosting instructions](../ops/hosting/terraform/README.md)
+
+- One public backend entry point; Identity and DeveloperPlatform remain in the same FastAPI application.
+- PostgreSQL and OPA are private to the runtime network. There is no public database ingress.
+- Encrypted EBS provides persistent Docker data; optional encrypted backups use S3. Terraform state is stored separately.
+- The instance has restricted ECR pull and SSM permissions. Workers require explicit provider configuration; hosting is distinct from per-developer resource provisioning.
+- The topology is single-host/single-AZ, not a highly available production system. ECS, ALB, RDS and API Gateway are not part of this Terraform target.
+
+## Image publishing
+
+![CI and image publishing](docs/diagrams/image-delivery.svg)
+
+[Editable draw.io source](docs/diagrams/image-delivery.drawio) · [Publish workflow](../.github/workflows/publish-images.yml)
+
+Successful eligible main-branch CI runs can trigger image publishing when AWS variables are configured. The workflow assumes a restricted GitHub OIDC role, builds and pushes API and frontend images, scans their digests using Trivy, and records release inputs. **Publishing does not deploy.** An SSM deployment role exists in Terraform, but an active production release runner and server deployment contract are not shipped.
 
 ## Run locally
 
@@ -134,7 +144,5 @@ uv run --frozen pytest -q tests/unit
 Integration tests additionally require isolated PostgreSQL and, for Docker lifecycle cases, a Docker daemon. See [integration tests](tests/integration/) and [CI](../.github/workflows/platform-ci.yml).
 
 **Security:** HttpOnly browser sessions, CSRF checks, project-scoped authorization and controlled credential exposure. No production secrets belong in Git.
-
----
 
 **Project status:** Active engineering prototype. The demonstrated runtime is local Docker; a production cloud provider and SSE progress delivery are not yet shipped.

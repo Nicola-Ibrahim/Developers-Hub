@@ -1,5 +1,6 @@
 @import "../features/resources/resources.css";
 @import "../features/identity/administration.css";
+@import "../features/identity/account-cards.css";
 @import "./entry.css";
 @import "../features/workspace/workspace.css";
 @import "../features/applications/delivery.css";

@@ -5,6 +5,26 @@ test_session_owner_allowed if {
 	result.allow
 }
 
+test_profile_owner_allowed if {
+	result := decision with input as {"subject": {"id": "user-1"}, "action": "identity.profile.read", "resource": {"kind": "profile", "owner_id": "user-1"}}
+	result.allow
+}
+
+test_profile_other_user_denied if {
+	result := decision with input as {"subject": {"id": "user-1"}, "action": "identity.profile.update", "resource": {"kind": "profile", "owner_id": "user-2"}}
+	result.allow == false
+}
+
+test_token_owner_allowed if {
+	result := decision with input as {"subject": {"id": "user-1"}, "action": "identity.tokens.read", "resource": {"kind": "token", "owner_id": "user-1"}}
+	result.allow
+}
+
+test_other_users_token_denied if {
+	result := decision with input as {"subject": {"id": "user-1"}, "action": "identity.tokens.write", "resource": {"kind": "token", "owner_id": "user-2"}}
+	result.allow == false
+}
+
 test_other_user_denied if {
 	result := decision with input as {"subject": {"id": "user-1", "role": "developer"}, "action": "identity.sessions.read", "resource": {"kind": "session", "owner_id": "user-2"}}
 	result.allow == false

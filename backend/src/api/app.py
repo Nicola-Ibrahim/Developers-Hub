@@ -22,6 +22,7 @@ from api.settings.config import APISettings, get_api_settings
 from composition.runtime import BackendRuntime
 from devops_platform.application.shared.errors import CatalogForbidden, PlatformRequestError
 from devops_platform.domain import DomainError
+from identity.application.interfaces.authorization import AuthorizationUnavailable
 from identity.application.shared.errors import CredentialDeliveryError, IdentityUnavailable
 from identity.domain.errors import AuthenticationRejected, IdentityValidationError
 from shared.infra.settings import Settings
@@ -92,6 +93,17 @@ class DevOpsHubAPI(FastAPI):
         @app.exception_handler(IdentityUnavailable)
         async def unavailable(request: Request, exc: IdentityUnavailable) -> JSONResponse:
             return error_response(request, 503, exc.code, exc.message)
+
+        @app.exception_handler(AuthorizationUnavailable)
+        async def authorization_unavailable(
+            request: Request, _exc: AuthorizationUnavailable
+        ) -> JSONResponse:
+            return error_response(
+                request,
+                503,
+                "authorization_unavailable",
+                "Authorization is temporarily unavailable",
+            )
 
         @app.exception_handler(IdentityValidationError)
         async def identity_invalid(request: Request, exc: IdentityValidationError) -> JSONResponse:
