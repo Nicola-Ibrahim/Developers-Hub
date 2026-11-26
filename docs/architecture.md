@@ -18,31 +18,31 @@ flowchart TB
 
     subgraph API["FastAPI control-plane API · Python process"]
         Routes["HTTP routes and schemas<br/>Transport mapping and validation"]
-        Boundary["API composition / platform request boundary<br/>Credentials, authorization and transactions"]
         Identity["Identity module<br/>Accounts, credentials and sessions"]
         Platform["DeveloperPlatform module<br/>Projects, access, resources and delivery"]
         Dispatch["Typed module dispatch<br/>Command/query handler resolution"]
         Domain["Domain models and policies<br/>Invariants and state transitions"]
         Persistence["SQLAlchemy adapters<br/>Repositories and projections"]
-        DI["Dishka composition<br/>Providers and execution scopes"]
+        DI["Backend runtime<br/>Dishka providers and execution scopes"]
     end
 
     Browser -->|Requests| Routes
-    Routes -->|Delegates| Boundary
-    Boundary -->|Identity operations| Identity
-    Boundary -->|Platform operations| Dispatch
-    Dispatch -->|Invokes| Platform
+    Routes -->|Authenticates the caller| Identity
+    Routes -->|Submits authorized inputs| Platform
+    Identity -->|Resolves handlers| Dispatch
+    Platform -->|Resolves handlers| Dispatch
     Platform -->|Enforces invariants| Domain
     Identity -->|Persists| Persistence
     Platform -->|Persists| Persistence
     Persistence -->|SQL| DB
-    Boundary -->|Evaluates identity permissions| OPA
+    Identity -->|Evaluates account permissions| OPA
+    Platform -->|Evaluates project permissions| OPA
     DI -.->|Resolves dependencies| Identity
     DI -.->|Resolves dependencies| Platform
     DI -.->|Provides transaction sessions| Persistence
 ```
 
-The diagram shows logical components and dependencies; it is **not a claim that every use case currently follows an identical dispatcher pipeline**. Platform HTTP operations use Dishka `ACTION` scopes; some Identity workflows retain specialized transaction handling.
+Platform HTTP operations use Dishka `ACTION` scopes. Identity workflows such as login have their own transaction handling.
 
 ## Bounded-context responsibilities
 
@@ -50,7 +50,8 @@ The diagram shows logical components and dependencies; it is **not a claim that 
 | --- | --- | --- |
 | **Identity** | Users, credentials, API tokens, browser sessions, authentication and session security | [`backend/src/identity/`](../backend/src/identity/) |
 | **DeveloperPlatform** | Projects, project membership and authorization, resource admission/leases, operations, application delivery | [`backend/src/devops_platform/`](../backend/src/devops_platform/) |
-| **Composition** | HTTP adaptation, cross-context integration, Dishka registration, transaction boundary assembly | [`backend/src/api/`](../backend/src/api/) and [`backend/src/composition/`](../backend/src/composition/) |
+| **HTTP API** | Request and response mapping, calls to Identity and DeveloperPlatform | [`backend/src/api/`](../backend/src/api/) |
+| **Backend runtime** | Process lifecycle and assembly of context-owned Dishka providers | [`backend/src/backend.py`](../backend/src/backend.py) |
 
 The two contexts share a PostgreSQL control-plane database. Their separation is primarily **code, ownership, and domain behavior**, not separate databases or deployments.
 
@@ -61,7 +62,7 @@ The two contexts share a PostgreSQL control-plane database. Their separation is 
 ```mermaid
 sequenceDiagram
     participant Route as FastAPI route
-    participant Host as Platform request boundary
+    participant Host as DeveloperPlatform module
     participant Action as Dishka ACTION scope
     participant Handler as Application handler
     participant DB as PostgreSQL
@@ -76,7 +77,9 @@ sequenceDiagram
     Action-->>Route: Materialized result
 ```
 
-The module boundary owns the **normal atomic platform operation**, while SQLAlchemy supplies the actual database transaction. A request may contain multiple separate operations; an HTTP connection is **not** automatically one long transaction.
+The module owns each atomic Platform operation, and SQLAlchemy supplies the database transaction. A request can span multiple transactions.
+
+For `POST /api/v1/resources`, the API authenticates the credential through Identity before giving the authenticated principal to Platform. Platform locks and checks current project membership and evaluates provisioning permissions in the transaction that records the job. An already-authenticated request can finish recording the job if the credential is revoked mid-request. Cookie-authenticated writes verify CSRF through Identity before calling Platform. The preview webhook verifies its own signature.
 
 ### Multi-phase work
 
@@ -115,9 +118,10 @@ flowchart LR
 | --- | --- |
 | API assembly and routes | [`backend/src/api/`](../backend/src/api/) |
 | Typed dispatch registry | [`backend/src/shared/dispatch.py`](../backend/src/shared/dispatch.py) |
-| Platform HTTP transaction boundary | [`backend/src/api/platform/module.py`](../backend/src/api/platform/module.py) |
-| Identity module dispatch | [`backend/src/identity/infra/composition/module.py`](../backend/src/identity/infra/composition/module.py) |
-| Platform per-operation DI | [`backend/src/devops_platform/infra/composition/providers_action.py`](../backend/src/devops_platform/infra/composition/providers_action.py) |
+| Platform HTTP transaction boundary | [`backend/src/devops_platform/infra/module.py`](../backend/src/devops_platform/infra/module.py) |
+| Backend startup and dependency bindings | [`backend/src/backend.py`](../backend/src/backend.py) |
+| Identity module dispatch | [`backend/src/identity/infra/module.py`](../backend/src/identity/infra/module.py) |
+| Platform per-operation DI | [`backend/src/devops_platform/infra/di/providers_action.py`](../backend/src/devops_platform/infra/di/providers_action.py) |
 | Resource worker | [`backend/src/devops_platform/infra/workers/resource_worker.py`](../backend/src/devops_platform/infra/workers/resource_worker.py) |
 | Application delivery worker | [`backend/src/devops_platform/infra/workers/application_host.py`](../backend/src/devops_platform/infra/workers/application_host.py) |
 

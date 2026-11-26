@@ -12,7 +12,7 @@ The API turns a developer request into an **authorized, durable operation**. Pro
 
 | Capability | Implementation |
 | --- | --- |
-| **Identity & access** | Internal users, browser sessions, API tokens, project roles, OPA-backed identity policies |
+| **Identity & access** | Internal users, browser sessions, API tokens, project roles, shared OPA policies |
 | **Temporary infrastructure** | Approved PostgreSQL options, quotas, leases, renewal, connection access and deletion |
 | **Application delivery** | Versioned FastAPI, Node.js and ASP.NET Core templates, local Docker delivery, optional GitHub previews |
 | **Resilience** | Idempotency, durable operations, worker claims, heartbeats, retries and reconciliation |
@@ -29,11 +29,32 @@ The two bounded contexts live in **one modular monolith**, not separate microser
 
 | Boundary | Responsibility |
 | --- | --- |
-| Identity | Accounts, credentials, sessions, API tokens and identity policies |
+| Identity | Accounts, credentials, sessions and API tokens |
 | DeveloperPlatform | Projects, membership, resource lifecycle, application delivery |
-| API composition | HTTP mapping, identity and platform integration, transaction orchestration |
-| Infrastructure adapters | SQLAlchemy repositories and projections, OPA policy evaluation, runtime providers |
+| HTTP API | Request and response mapping through the Identity and DeveloperPlatform modules |
+| Backend runtime | Process lifecycle and assembly of context-owned Dishka providers |
+| Infrastructure adapters | SQLAlchemy repositories and projections, shared OPA client, runtime providers |
 | Workers | Claim durable jobs, perform external effects, persist outcomes |
+
+Each context registers its module commands and queries once. The mediator uses those
+bindings to select handlers, and Dishka uses them to construct handlers in the request
+or action scope. Container construction checks for missing message registrations, and
+the registry rejects duplicate bindings. Routes call `execute()` or `query()` on the modules.
+
+Identity and DeveloperPlatform dispatch protected operations through the policies in
+[`ops/policies/`](../ops/policies/). Rego evaluates current actor, project, and ownership
+facts supplied by the backend.
+The API authenticates sessions and tokens through Identity, including CSRF validation
+for cookie-authenticated writes. Platform checks current membership and credential scope
+within its transaction. For example, a credential revoked after authentication can still
+finish recording a provisioning request if the account and membership remain authorized.
+
+The API and workers run as separate processes. The FastAPI lifespan and worker entry
+points start and close `BackendRuntime`. Database, schema, and policy readiness are
+checked explicitly.
+
+Local Compose and packaged-stack acceptance mount the same bundle read-only.
+`/health/authorization` verifies the shared decision endpoint and policy revision.
 
 **Transaction boundaries:** ordinary Platform operations use a Dishka `ACTION` scope and short SQLAlchemy transaction. Specialized Identity workflows manage multiple phases where needed. External provider calls run **outside** the database transaction. The diagram shows logical components, not one universal handler pipeline.
 
@@ -123,11 +144,11 @@ API documentation: `http://127.0.0.1:8000/docs` · Health: `/health/live`, `/hea
 
 | Concern | Entry point |
 | --- | --- |
-| HTTP transaction boundary | [`src/api/platform/module.py`](src/api/platform/module.py) |
+| Platform module and transaction boundary | [`src/devops_platform/infra/module.py`](src/devops_platform/infra/module.py) |
 | Typed dispatcher | [`src/shared/dispatch.py`](src/shared/dispatch.py) |
 | Domain models | [`src/devops_platform/domain/`](src/devops_platform/domain/) |
 | Identity | [`src/identity/`](src/identity/) |
-| Composition and DI | [`src/composition/container.py`](src/composition/container.py) |
+| Backend runtime and DI | [`src/backend.py`](src/backend.py) |
 | Resource and delivery workers | [`src/devops_platform/infra/workers/`](src/devops_platform/infra/workers/) |
 
 ## Quality checks

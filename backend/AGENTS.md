@@ -21,7 +21,7 @@ backend/src/
 │   ├── domain/
 │   ├── application/
 │   └── infra/
-├── composition/      # Dependency wiring and integrations
+├── backend.py        # Process runtime and dependency assembly
 └── shared/           # Shared technical components
 
 This is the current high-level structure.
@@ -61,7 +61,9 @@ Prefer clear separation of concerns:
 - Application: use cases and workflow coordination.
 - Infrastructure: persistence and external adapters.
 - API: transport and request/response handling.
-- Composition: dependency wiring and integration.
+- Backend runtime: process lifecycle and dependency assembly.
+- Context infrastructure exposes `module.py` and keeps its containers and providers in `di/`.
+- Bounded contexts own their authorization rules, transactions, and workflows.
 
 Dependencies should generally point toward business logic.
 

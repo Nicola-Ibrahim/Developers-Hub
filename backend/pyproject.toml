@@ -35,7 +35,7 @@ packages = [
     "src/identity",
     "src/devops_platform",
     "src/shared",
-    "src/composition",
+    "src/backend.py",
 ]
 
 [tool.pytest.ini_options]

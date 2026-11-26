@@ -19,7 +19,7 @@ A developer should not need to repeat repository setup, database configuration, 
 | **Create** | Start applications from versioned FastAPI, Node.js, and ASP.NET Core templates; integrate with GitHub when configured. |
 | **Provision** | Request approved temporary PostgreSQL databases with quotas, leases, and controlled cleanup. |
 | **Deliver** | Manage local Docker application delivery, deployment steps, retries, and optional pull-request previews. |
-| **Control access** | Use project roles, browser sessions, API tokens, CSRF protection, and OPA-backed identity authorization. |
+| **Control access** | Use project roles, browser sessions, API tokens, CSRF protection, and shared OPA authorization. |
 | **Track operations** | Review durable resource and delivery status, activity, failures, and retry outcomes in a Next.js workspace. |
 
 ## Architecture
@@ -103,7 +103,7 @@ To inspect or stop local services:
 | Domain boundaries and transaction orchestration | [Architecture deep dive](docs/architecture.md) |
 | Authentication, sessions and authorization | [`backend/src/identity`](backend/src/identity/) |
 | Project resources, application delivery and workers | [`backend/src/devops_platform`](backend/src/devops_platform/) |
-| HTTP integration and DI composition | [`backend/src/api`](backend/src/api/) · [`backend/src/composition`](backend/src/composition/) |
+| HTTP API and backend runtime | [`backend/src/api`](backend/src/api/) · [`backend/src/backend.py`](backend/src/backend.py) |
 | Developer dashboard | [`frontend/src/features`](frontend/src/features/) |
 | Infrastructure configuration | [`ops`](ops/) · [Terraform notes](ops/hosting/terraform/README.md) |
 
