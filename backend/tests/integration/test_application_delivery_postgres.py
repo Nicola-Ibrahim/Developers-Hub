@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import Session
-from test_foundation_postgres import async_engine_for
+from test_foundation_postgres import async_engine_for, register_project
 
 from devops_platform.application.applications.create_application.command import (
     ApplicationRegistration,
@@ -30,6 +30,64 @@ from devops_platform.infra.persistence.repositories.delivery import (
 from identity.infra.persistence.models.user import InternalUserRow
 
 pytestmark = pytest.mark.postgres
+
+
+def test_authorization_outage_keeps_resource_delivery_recoverable(postgres_engine):
+    project = register_project(postgres_engine, "delivery-policy-recovery")
+    owner_id, app_id = uuid4(), uuid4()
+    now = datetime.now(UTC)
+    with Session(postgres_engine) as session, session.begin():
+        environment_id = session.scalar(
+            select(ProjectEnvironmentRow.id).where(
+                ProjectEnvironmentRow.project_id == project.project_id
+            )
+        )
+        session.add(InternalUserRow(id=owner_id, name="delivery-policy-recovery-owner"))
+        session.flush()
+        session.add(
+            ApplicationRow(
+                id=app_id,
+                project_id=project.project_id,
+                environment_id=environment_id,
+                owner_id=owner_id,
+                name="delivery-demo",
+                template_id="python-fastapi",
+                template_version="1.0.0",
+                repository_url="https://example.test/repository",
+            )
+        )
+        session.flush()
+        session.add(
+            ApplicationDeliveryStepRow(
+                application_id=app_id,
+                kind="resource",
+                idempotency_key="recover-authorized-resource",
+                attempts=4,
+                next_attempt_at=now,
+            )
+        )
+
+    async def exercise():
+        engine = async_engine_for(postgres_engine)
+        sessions = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with sessions() as session, session.begin():
+                repo = SQLAlchemyApplicationDeliveryRepository(session)
+                claim = await repo.claim_step(now, lease_seconds=15)
+                assert claim is not None and claim.attempts == 5
+                assert await repo.fail_step(claim, "authorization_unavailable", now, 30, True)
+            async with sessions() as session, session.begin():
+                repo = SQLAlchemyApplicationDeliveryRepository(session)
+                assert await repo.claim_step(now + timedelta(seconds=29), 15) is None
+                recovered = await repo.claim_step(now + timedelta(seconds=30), 15)
+                assert recovered is not None and recovered.step_id == claim.step_id
+                assert recovered.claim_token != claim.claim_token
+                assert recovered.attempts == 6
+                assert not await repo.effect_is_current(claim, now + timedelta(seconds=30))
+        finally:
+            await engine.dispose()
+
+    asyncio.run(exercise())
 
 
 @pytest.mark.parametrize("blocked_steps", [0, 101])

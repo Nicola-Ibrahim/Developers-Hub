@@ -1,6 +1,6 @@
 """Project access writes and member projections on a caller-owned transaction.
 
-The user ORM row, audit callback, and error factories are supplied by Identity at
+The user ORM row, audit callback, and validation error factory are supplied by Identity at
 composition time. Identity still owns account records and audit semantics; this
 adapter owns project membership SQL and uses the existing session and rule query.
 """
@@ -20,7 +20,6 @@ from identity.infra.persistence.models.user import InternalUserRow
 
 AuditActivity = Callable[[UUID | None, UUID, UUID | None, str, str, datetime], Awaitable[None]]
 ValidationErrorFactory = Callable[[str], Exception]
-AuthorizationErrorFactory = Callable[[], Exception]
 
 
 async def project_memberships(
@@ -135,14 +134,12 @@ class SQLAlchemyProjectAccessRepository:
         user_row: type[Any],
         record_activity: AuditActivity,
         validation_error: ValidationErrorFactory,
-        authorization_error: AuthorizationErrorFactory,
     ) -> None:
         self._session = session
         self._rules = rules
         self._user = user_row
         self._record_activity = record_activity
         self._validation_error = validation_error
-        self._authorization_error = authorization_error
 
     async def set_membership(
         self,
@@ -161,14 +158,6 @@ class SQLAlchemyProjectAccessRepository:
         )
         if not project_exists or target is None or not target.active:
             raise self._validation_error("Active user and project are required")
-        actor_role = await self._session.scalar(
-            select(ProjectMembershipRow.role).where(
-                ProjectMembershipRow.user_id == actor_id,
-                ProjectMembershipRow.project_id == project_id,
-            )
-        )
-        if actor_role != "admin":
-            raise self._authorization_error()
         row = await self._session.get(
             ProjectMembershipRow, (user_id, project_id), with_for_update=True
         )
@@ -235,16 +224,8 @@ class SQLAlchemyProjectAccessRepository:
         )
 
     async def list_project_members(
-        self, *, actor_id: UUID, project_id: UUID
+        self, *, project_id: UUID
     ) -> tuple[tuple[UUID, str, str, bool], ...]:
-        actor_role = await self._session.scalar(
-            select(ProjectMembershipRow.role).where(
-                ProjectMembershipRow.user_id == actor_id,
-                ProjectMembershipRow.project_id == project_id,
-            )
-        )
-        if actor_role != "admin":
-            raise self._authorization_error()
         rows = (
             await self._session.execute(
                 select(

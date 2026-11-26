@@ -16,6 +16,7 @@ from devops_platform.authorization import ALL_SCOPES
 from devops_platform.infra.composition.container import DeveloperPlatformContainer
 from identity.infra.composition.container import IdentityContainer
 from identity.infra.composition.providers import IdentityTokenScopePolicy
+from shared.infra.authorization.provider import AuthorizationProvider
 from shared.infra.providers import DatabaseProvider, ExternalDatabase
 from shared.infra.settings import Settings
 
@@ -72,6 +73,7 @@ class BackendContainer:
             IdentityActionIntegrationProvider(component="identity_action"),
             PlatformActionIntegrationProvider(component="platform_action"),
             DatabaseProvider(),
+            AuthorizationProvider(),
             *self._identity.providers(),
             *self._platform.providers(),
             *host_providers,

@@ -22,6 +22,7 @@ from identity.domain.records import ApiTokenStatus, PersonalApiToken
 
 def test_create_and_list_personal_tokens_are_scoped_to_user_project_and_allowed_scopes():
     owner, project_a, project_b = uuid4(), uuid4(), uuid4()
+
     class Tokens:
         items = []
 
@@ -65,11 +66,7 @@ def test_create_and_list_personal_tokens_are_scoped_to_user_project_and_allowed_
     )
     reader = PersonalTokenQueryHandler(tokens)
     created, secret = asyncio.run(
-        creator.execute(
-            CreatePersonalTokenCommand(
-                owner, project_a, "build", ("catalog:read",), 2
-            )
-        )
+        creator.execute(CreatePersonalTokenCommand(owner, project_a, "build", ("catalog:read",), 2))
     )
     assert secret == "one-time-secret"
     assert created.scopes == ("catalog:read",)
@@ -78,11 +75,7 @@ def test_create_and_list_personal_tokens_are_scoped_to_user_project_and_allowed_
     assert asyncio.run(reader.execute(ListPersonalTokensQuery(owner))) == (created,)
     with pytest.raises(IdentityValidationError):
         asyncio.run(
-            creator.execute(
-                CreatePersonalTokenCommand(
-                    owner, project_a, "wide", ("admin:*",), 2
-                )
-            )
+            creator.execute(CreatePersonalTokenCommand(owner, project_a, "wide", ("admin:*",), 2))
         )
 
 
@@ -116,6 +109,7 @@ def test_rotation_keeps_expiry_and_scope_ceiling():
     old = PersonalApiToken(
         old_id, "deploy", project, ("catalog:read",), current + timedelta(minutes=5), current
     )
+
     class Tokens:
         async def lock_personal_token(self, _token_id):
             return ApiTokenStatus(old_id, owner, project, None)
@@ -136,9 +130,7 @@ def test_rotation_keeps_expiry_and_scope_ceiling():
             return "replacement-secret"
 
     handler = RotatePersonalTokenHandler(Tokens(), Hasher(), Generator(), ("catalog:read",))
-    rotated, secret = asyncio.run(
-        handler.execute(RotatePersonalTokenCommand(owner, old_id))
-    )
+    rotated, secret = asyncio.run(handler.execute(RotatePersonalTokenCommand(owner, old_id)))
     assert secret == "replacement-secret"
     assert rotated.token_id == new_id
     assert rotated.expires_at == old.expires_at
@@ -147,6 +139,7 @@ def test_rotation_keeps_expiry_and_scope_ceiling():
 
 def test_revoke_handler_has_minimal_dependencies_and_revokes_owned_token():
     owner, project, token_id = uuid4(), uuid4(), uuid4()
+
     class Tokens:
         async def lock_personal_token(self, _token_id):
             return ApiTokenStatus(token_id, owner, project, None)
@@ -157,6 +150,4 @@ def test_revoke_handler_has_minimal_dependencies_and_revokes_owned_token():
             return True
 
     handler = RevokePersonalTokenHandler(Tokens())
-    assert asyncio.run(
-        handler.execute(RevokePersonalTokenCommand(owner, token_id))
-    )
+    assert asyncio.run(handler.execute(RevokePersonalTokenCommand(owner, token_id)))

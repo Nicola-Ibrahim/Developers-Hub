@@ -88,21 +88,13 @@ def test_revoke_handler_authorizes_and_persists_for_dispatch_transaction(monkeyp
             return now
 
     monkeypatch.setattr(revoke_session_module, "datetime", FixedDateTime)
-    handler = RevokeSessionHandler(
-        repository,
-        SimpleNamespace(digest=lambda value: f"{value}-digest"),
-        ("https://portal.example",),
-    )
+    handler = RevokeSessionHandler(repository)
 
-    assert asyncio.run(
-        handler.execute(
-            RevokeSessionCommand("session", session_id, "csrf", "https://portal.example")
-        )
-    )
+    assert asyncio.run(handler.execute(RevokeSessionCommand(user_id, session_id)))
     assert repository.saved.revoked_at == now
 
 
-def test_logout_and_revoke_all_authorize_before_writing_in_unit_of_work(monkeypatch) -> None:
+def test_logout_and_revoke_all_write_using_prevalidated_session_context(monkeypatch) -> None:
     now = datetime(2026, 1, 1, tzinfo=UTC)
     user_id = uuid4()
     calls: list[tuple[str, object]] = []
@@ -111,10 +103,6 @@ def test_logout_and_revoke_all_authorize_before_writing_in_unit_of_work(monkeypa
         async def authorize_session_operation(self, *args, **kwargs):
             calls.append(("authorize", kwargs["lock_for_mutation"]))
             return SessionPrincipal(user_id, "dev", uuid4(), None, None, None, (), (), "")
-
-        async def validate_csrf(self, token_digest, csrf_digest):
-            calls.append(("csrf", (token_digest, csrf_digest)))
-            return token_digest == "session-digest" and csrf_digest == "csrf-digest"
 
         async def logout(self, token_digest, time):
             calls.append(("logout", (token_digest, time)))
@@ -137,29 +125,16 @@ def test_logout_and_revoke_all_authorize_before_writing_in_unit_of_work(monkeypa
     def digest(value):
         return f"{value}-digest"
 
-    logout = LogoutHandler(repository, SimpleNamespace(digest=digest), ("https://portal.example",))
-    revoke_all = RevokeAllSessionsHandler(
-        repository, SimpleNamespace(digest=digest), ("https://portal.example",)
-    )
+    logout = LogoutHandler(repository, SimpleNamespace(digest=digest))
+    revoke_all = RevokeAllSessionsHandler(repository)
 
     async def verify() -> None:
-        assert (
-            await logout.execute(LogoutCommand("session", "csrf", "https://portal.example")) is None
-        )
-        assert (
-            await revoke_all.execute(
-                RevokeAllSessionsCommand("session", "csrf", "https://portal.example")
-            )
-            == 3
-        )
+        assert await logout.execute(LogoutCommand("session")) is None
+        assert await revoke_all.execute(RevokeAllSessionsCommand(user_id)) == 3
 
     asyncio.run(verify())
     assert calls == [
-        ("authorize", True),
-        ("csrf", ("session-digest", "csrf-digest")),
         ("logout", ("session-digest", now)),
-        ("authorize", True),
-        ("csrf", ("session-digest", "csrf-digest")),
         ("logout_all", (user_id, now)),
     ]
 
@@ -240,7 +215,6 @@ def test_identity_action_handlers_get_fresh_sessions_and_share_each_uow_session(
                     ):
                         assert handler.sessions._session is session
                     elif handler_type is CreatePersonalTokenHandler:
-                        assert handler.sessions._session is session
                         assert handler.tokens._session is session
                     else:
                         assert handler.repository._session is session

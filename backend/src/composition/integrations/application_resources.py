@@ -24,10 +24,12 @@ from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.software_delivery.attach_database.command import (
     ResourceAttachmentSpec,
 )
-from devops_platform.authorization import ALL_SCOPES, authorize_platform_action
+from devops_platform.authorization import ALL_SCOPES, authorization_facts
 from devops_platform.infra.composition.resource_request_authority import resource_request_role
 from devops_platform.infra.persistence.models.resources import Resource
 from devops_platform.infra.persistence.repositories.resource import SQLAlchemyResourceRepository
+from shared.authorization.dispatch import require_authorized
+from shared.authorization.interfaces import AuthorizationDecisionPort
 
 
 class LedgerApplicationResources:
@@ -36,8 +38,10 @@ class LedgerApplicationResources:
         sessions: async_sessionmaker[AsyncSession],
         catalog: ApprovedPostgresCatalog,
         installation_id: UUID | None,
+        authorizer: AuthorizationDecisionPort,
     ) -> None:
         self.sessions, self.catalog, self.installation_id = sessions, catalog, installation_id
+        self.authorizer = authorizer
 
     async def request(
         self,
@@ -63,8 +67,12 @@ class LedgerApplicationResources:
                 command.size_id,
                 command.ttl_seconds,
             )
-            authorize_platform_action(
-                RequestTemporaryDatabase(access, request, idempotency_key, datetime.now(UTC))
+            message = RequestTemporaryDatabase(access, request, idempotency_key, datetime.now(UTC))
+            await require_authorized(
+                self.authorizer,
+                message,
+                authorization_facts(message, access, project_id=project_id),
+                ApplicationDeliveryFailure("resource_owner_not_authorized", retryable=False),
             )
             usecase = RequestTemporaryDatabaseHandler(
                 SQLAlchemyResourceRepository(session),

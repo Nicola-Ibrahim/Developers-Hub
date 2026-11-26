@@ -1,10 +1,9 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from uuid import UUID
 
 from shared.dispatch import Command
 
 
 @dataclass(frozen=True, slots=True)
 class RevokeAllSessionsCommand(Command[int]):
-    session_token: str = field(repr=False)
-    csrf_token: str = field(repr=False)
-    origin: str | None
+    actor_id: UUID

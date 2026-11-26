@@ -22,7 +22,7 @@ from devops_platform.application.projects.list_projects.query import (
     ReadProjects,
 )
 from devops_platform.application.shared.dto import AccessContext
-from devops_platform.authorization import ALL_SCOPES, authorize_platform_action
+from devops_platform.authorization import ALL_SCOPES
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
 from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
 from identity.application.interfaces.dispatch import IdentityModule
@@ -38,7 +38,6 @@ async def project(
     project_id: UUID, access: Access, module: FromDishka[DeveloperPlatformModule]
 ) -> ProjectRegistrationView:
     message = ReadProject(access, project_id)
-    authorize_platform_action(message)
     result = await module.query(message)
     return ProjectRegistrationView.model_validate(asdict(result))
 
@@ -74,6 +73,5 @@ async def projects(
             ),
         )
     message = ReadProjects(accesses)
-    authorize_platform_action(message)
     rows = await module.query(message)
     return [ProjectRegistrationView.model_validate(asdict(row)) for row in rows]

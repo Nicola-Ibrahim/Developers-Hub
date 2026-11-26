@@ -4,12 +4,12 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter
 
 from api.core.errors import APIError
-from identity.application.authorization.models import AuthorizationRequest
-from identity.application.interfaces.authorization import (
+from shared.application.interfaces.readiness import ReadinessProbe
+from shared.authorization.interfaces import (
     AuthorizationDecisionPort,
     AuthorizationUnavailable,
 )
-from shared.application.interfaces.readiness import ReadinessProbe
+from shared.authorization.models import AuthorizationRequest
 
 router = APIRouter()
 
@@ -39,6 +39,6 @@ async def authorization_ready(authorizer: FromDishka[AuthorizationDecisionPort])
         )
     except AuthorizationUnavailable:
         raise APIError(503, "authorization_unavailable", "Authorization unavailable") from None
-    if decision.allowed or decision.policy_revision != "identity-v1":
+    if decision.allowed or decision.policy_revision != "authorization-v1":
         raise APIError(503, "authorization_not_ready", "Authorization policy not ready")
     return {"status": "ready"}

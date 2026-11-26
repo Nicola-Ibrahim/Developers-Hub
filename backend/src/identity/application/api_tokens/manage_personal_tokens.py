@@ -117,4 +117,3 @@ class RevokePersonalTokenHandler:
             token_id=command.token_id,
             now=datetime.now(UTC),
         )
-

@@ -9,6 +9,8 @@ class ReadProjectHandler:
         self.repository = repository
 
     async def execute(self, query: ReadProject) -> ProjectRegistrationDetails:
+        if query.project_id != query.access.project_id:
+            raise resource_not_found()
         project = await self.repository.find_project(query.project_id)
         if project is None:
             raise resource_not_found()

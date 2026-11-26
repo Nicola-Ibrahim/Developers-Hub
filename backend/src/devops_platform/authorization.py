@@ -1,80 +1,10 @@
-"""Platform action permissions shared by HTTP and non-HTTP hosts.
+"""Token scope vocabulary and trusted authorization input construction."""
 
-The API checks before dispatch; the host checks again using authenticated access.
-Loaded resource ownership and state remain domain/persistence decisions.
-"""
-
-from dataclasses import dataclass
-from typing import Literal
 from uuid import UUID
 
-from devops_platform.application.applications.create_application.command import (
-    CreateApplication,
-)
-from devops_platform.application.applications.get_application.query import (
-    ReadApplication,
-)
-from devops_platform.application.applications.list_applications.query import (
-    ReadApplications,
-)
-from devops_platform.application.applications.read_templates.query import ReadTemplates
-from devops_platform.application.project_access.list_project_members.query import ListProjectMembers
-from devops_platform.application.project_access.manage_project_membership.command import (
-    ManageProjectMembership,
-)
-from devops_platform.application.projects.get_project.query import (
-    ReadProject,
-)
-from devops_platform.application.projects.list_projects.query import (
-    ReadProjects,
-)
-from devops_platform.application.resource_management.catalog.query import ReadCatalog
-from devops_platform.application.resource_management.delete_database.command import (
-    DeleteDatabase,
-)
-from devops_platform.application.resource_management.get_operation.query import (
-    ReadOperation,
-)
-from devops_platform.application.resource_management.get_resource.query import (
-    ReadResource,
-)
-from devops_platform.application.resource_management.list_resources.query import (
-    ReadResources,
-)
-from devops_platform.application.resource_management.read_activity.query import (
-    ReadResourceActivity,
-)
-from devops_platform.application.resource_management.read_connection.query import (
-    ReadDatabaseConnection,
-)
-from devops_platform.application.resource_management.renew_lease.command import (
-    RenewDatabase,
-)
-from devops_platform.application.resource_management.submit_database_request.command import (
-    RequestTemporaryDatabase,
-)
-from devops_platform.application.shared.errors import (
-    CatalogForbidden,
-    PlatformRequestError,
-    resource_not_found,
-)
-from devops_platform.application.software_delivery.attach_database.command import AttachDatabase
-from devops_platform.application.software_delivery.create_local_preview.command import (
-    CreateLocalPreview,
-)
-from devops_platform.application.software_delivery.deploy_application.command import (
-    DeployApplication,
-)
-from devops_platform.application.software_delivery.handle_preview_webhook.command import (
-    ProcessGithubPreviewWebhook,
-)
-from devops_platform.application.software_delivery.read_deployment_history.query import (
-    ReadDeploymentHistory,
-)
-from devops_platform.application.software_delivery.retry_delivery_step.command import (
-    RetryDeliveryStep,
-)
+from devops_platform.application.projects.list_projects.query import ReadProjects
 from devops_platform.domain.value_objects.access_context import AccessContext
+from shared.authorization.models import AuthorizationRequest
 
 ALL_SCOPES = (
     "catalog:read",
@@ -84,77 +14,51 @@ ALL_SCOPES = (
 )
 
 
-@dataclass(frozen=True, slots=True)
-class ActionPermission:
-    scope: str | None
-    target: Literal["actor", "project", "request", "memberships", "public"] = "actor"
-    delivery: bool = False
-    owner_required: bool = False  # Enforced after loading the resource/application.
+def authorization_facts(
+    message: object,
+    access: AccessContext | None = None,
+    *,
+    project_id: UUID | None = None,
+    owner_id: UUID | None = None,
+) -> AuthorizationRequest:
+    """Build the existing subject/resource envelope from authenticated facts."""
+    if access is None:
+        access = getattr(message, "access", None)
+    if access is None and isinstance(message, ReadProjects) and message.accesses:
+        access = message.accesses[0]
 
+    cls_module = type(message).__module__
+    kind = (
+        "applications"
+        if ".applications." in cls_module or ".software_delivery." in cls_module
+        else "projects"
+        if ".projects." in cls_module or ".project_access." in cls_module
+        else "resources"
+    )
+    if project_id is None:
+        project_id = getattr(message, "project_id", None)
+        request = getattr(message, "request", None)
+        if project_id is None and request is not None:
+            project_id = getattr(request, "project_id", None)
+        if project_id is None and access is not None:
+            project_id = access.project_id
 
-ACTION_PERMISSIONS: dict[type[object], ActionPermission] = {
-    ListProjectMembers: ActionPermission("resources:read", "project"),
-    ManageProjectMembership: ActionPermission("resources:write", "project"),
-    ReadCatalog: ActionPermission("catalog:read"),
-    ReadProject: ActionPermission("resources:read", "project"),
-    ReadProjects: ActionPermission("resources:read", "memberships"),
-    ReadResources: ActionPermission("resources:read", "project"),
-    ReadResource: ActionPermission("resources:read"),
-    ReadOperation: ActionPermission("resources:read"),
-    ReadDatabaseConnection: ActionPermission("connections:read", owner_required=True),
-    ReadResourceActivity: ActionPermission("resources:read", "project"),
-    ReadTemplates: ActionPermission(None, "public"),
-    ReadApplications: ActionPermission("resources:read", delivery=True),
-    ReadApplication: ActionPermission("resources:read", delivery=True),
-    ReadDeploymentHistory: ActionPermission("resources:read", delivery=True),
-    RequestTemporaryDatabase: ActionPermission("resources:write", "request"),
-    RenewDatabase: ActionPermission("resources:write", owner_required=True),
-    DeleteDatabase: ActionPermission("resources:write", owner_required=True),
-    CreateApplication: ActionPermission("resources:write", delivery=True),
-    CreateLocalPreview: ActionPermission("resources:write", delivery=True),
-    AttachDatabase: ActionPermission("resources:write", delivery=True, owner_required=True),
-    DeployApplication: ActionPermission("resources:write", delivery=True, owner_required=True),
-    RetryDeliveryStep: ActionPermission("resources:write", delivery=True, owner_required=True),
-    ProcessGithubPreviewWebhook: ActionPermission(None, "public"),
-}
-
-
-def _check_actor(access: AccessContext, project_id: UUID, permission: ActionPermission) -> None:
-    if access.project_id != project_id:
-        raise resource_not_found()
-    if access.role not in {"developer", "admin"} or permission.scope not in access.scopes:
-        if permission.delivery:
-            raise PlatformRequestError("forbidden", "Application access is not permitted", 403)
-        raise CatalogForbidden()
-
-
-def authorize_platform_access(
-    action_type: type[object], access: AccessContext, *, project_id: UUID | None = None
-) -> None:
-    """Check a trusted actor for a developer action without an HTTP dependency."""
-    permission = ACTION_PERMISSIONS.get(action_type)
-    if permission is None or permission.target == "public":
-        raise TypeError("Action has no developer permission policy")
-    _check_actor(access, access.project_id if project_id is None else project_id, permission)
-
-
-def authorize_platform_action(message: object) -> None:
-    """Reject unknown actions and enforce coarse project/role/scope access."""
-    permission = ACTION_PERMISSIONS.get(type(message))
-    if permission is None:
-        raise TypeError("Unregistered platform action")
-    if permission.target == "public":
-        return
-    if permission.target == "memberships":
-        assert isinstance(message, ReadProjects)
-        for membership_access in message.accesses:
-            authorize_platform_access(type(message), membership_access)
-        return
-    access: AccessContext = message.access  # type: ignore[attr-defined]
-    if permission.target == "project":
-        project_id = message.project_id  # type: ignore[attr-defined]
-    elif permission.target == "request":
-        project_id = message.request.project_id  # type: ignore[attr-defined]
-    else:
-        project_id = access.project_id
-    authorize_platform_access(type(message), access, project_id=project_id)
+    resource_id = next(
+        (
+            getattr(message, field)
+            for field in ("application_id", "resource_id", "operation_id", "project_id")
+            if isinstance(getattr(message, field, None), UUID)
+        ),
+        None,
+    )
+    return AuthorizationRequest(
+        subject_id=access.user_id if access is not None else UUID(int=0),
+        action="",
+        resource_kind=kind,
+        resource_id=resource_id,
+        project_id=project_id,
+        subject_project_id=access.project_id if access is not None else None,
+        role=access.role if access is not None else None,
+        scopes=tuple(sorted(access.scopes)) if access is not None else (),
+        owner_id=owner_id,
+    )

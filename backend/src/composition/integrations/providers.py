@@ -24,6 +24,7 @@ from identity.domain.interfaces.project_access import IdentityProjectAccess
 from identity.infra.composition.api_token_transactions import SqlAlchemyApiTokenTransaction
 from identity.infra.composition.identity_transactions import SqlAlchemyIdentityTransaction
 from shared.application.interfaces.unit_of_work import UnitOfWork
+from shared.authorization.interfaces import AuthorizationDecisionPort
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
 
@@ -61,8 +62,9 @@ class CrossContextIntegrationProvider(Provider):
         sessions: async_sessionmaker[AsyncSession],
         catalog: ApprovedPostgresCatalog,
         settings: Settings,
+        authorizer: AuthorizationDecisionPort,
     ) -> ResourceProvisioner:
-        return LedgerApplicationResources(sessions, catalog, settings.installation_id)
+        return LedgerApplicationResources(sessions, catalog, settings.installation_id, authorizer)
 
     @provide(scope=Scope.REQUEST)
     def register_project(

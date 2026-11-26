@@ -14,7 +14,6 @@ from devops_platform.application.resource_management.get_operation.query import 
     ReadOperation,
 )
 from devops_platform.application.shared.dto import AccessContext
-from devops_platform.authorization import authorize_platform_action
 
 router = APIRouter()
 Access = Annotated[AccessContext, Depends(platform_access)]
@@ -26,6 +25,5 @@ async def operation(
     operation_id: UUID, access: Access, module: FromDishka[DeveloperPlatformModule]
 ) -> OperationView:
     message = ReadOperation(access, operation_id)
-    authorize_platform_action(message)
     result = await module.query(message)
     return OperationView.model_validate(asdict(result))

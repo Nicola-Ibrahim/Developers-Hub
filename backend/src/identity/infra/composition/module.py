@@ -2,6 +2,7 @@
 
 from collections.abc import Awaitable, Callable
 from typing import TypeVar, cast
+from uuid import UUID
 
 from dishka import AsyncContainer, Scope
 
@@ -56,8 +57,12 @@ from identity.application.sessions.select_active_project.handler import (
 from identity.application.shared.errors import IdentityUnavailable
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.interfaces.session_repository import SessionRepository
+from identity.domain.records import SessionPrincipal
 from identity.domain.session_errors import SessionAuthenticationRejected
-from shared.dispatch import Command, HandlerRegistry, ModuleDispatcher, Query
+from shared.authorization.dispatch import require_authorized
+from shared.authorization.interfaces import AuthorizationDecisionPort, AuthorizationDenied
+from shared.authorization.models import AuthorizationRequest
+from shared.dispatch import Command, HandlerRegistry, ModuleDispatcher, Query, UnsupportedMessage
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork
 
 ResultT = TypeVar("ResultT")
@@ -116,31 +121,120 @@ class IdentityModuleDispatcher(ModuleDispatcher):
     async def execute(self, command: Command[ResultT]) -> ResultT:
         if type(command) not in IDENTITY_HANDLER_REGISTRY.commands:
             return await super().execute(command)
-        if type(command) is ChangePasswordCommand:
-            raise SessionAuthenticationRejected()
-        if type(command) is LoginCommand:
-            return await super().execute(command)
-        return await self._dispatch_action(lambda dispatcher: dispatcher.execute(command))
+        if isinstance(command, LoginCommand):
+            return await super().execute(cast(Command[ResultT], command))
+        raise SessionAuthenticationRejected()
 
     async def execute_with_precondition(
         self, command: Command[ResultT], precondition: ActionPrecondition
     ) -> ResultT:
-        """Run an API supplied browser guard in the handler's ACTION transaction."""
-        if type(command) is ChangePasswordCommand:
+        if type(command) not in IDENTITY_HANDLER_REGISTRY.commands or isinstance(
+            command, LoginCommand
+        ):
+            raise UnsupportedMessage("Unsupported protected command")
+        guard = self._secured_precondition(command, precondition)
+        if isinstance(command, ChangePasswordCommand):
             handler = await self._container.get(ChangePasswordHandler)
-            return await handler.execute(command, precondition)
-        if type(command) not in IDENTITY_HANDLER_REGISTRY.commands:
-            return await self.execute(command)
-        return await self._dispatch_action(
-            lambda dispatcher: dispatcher.execute(command), precondition
-        )
+            await handler.execute(command, guard)
+            return cast(ResultT, None)
+        return await self._dispatch_action(lambda dispatcher: dispatcher.execute(command), guard)
 
     async def query(self, query: Query[ResultT]) -> ResultT:
         if type(query) not in IDENTITY_HANDLER_REGISTRY.queries:
             return await super().query(query)
         if type(query) is AuthenticateApiTokenQuery:
             return await super().query(cast(Query[ResultT], query))
-        return await self._dispatch_action(lambda dispatcher: dispatcher.query(query))
+        if type(query) is AuthenticateSessionQuery:
+            return await self._dispatch_action(
+                lambda dispatcher: dispatcher.query(cast(Query[ResultT], query))
+            )
+        raise SessionAuthenticationRejected()
+
+    async def query_with_precondition(
+        self, query: Query[ResultT], precondition: ActionPrecondition
+    ) -> ResultT:
+        if type(query) not in IDENTITY_HANDLER_REGISTRY.queries or isinstance(
+            query, (AuthenticateApiTokenQuery, AuthenticateSessionQuery)
+        ):
+            raise UnsupportedMessage("Unsupported protected query")
+        return await self._dispatch_action(
+            lambda dispatcher: dispatcher.query(query),
+            self._secured_precondition(query, precondition),
+        )
+
+    def _secured_precondition(
+        self, message: object, authenticate: ActionPrecondition
+    ) -> ActionPrecondition:
+        async def check(
+            sessions: SessionRepository, tokens: ApiTokenRepository | None
+        ) -> SessionPrincipal:
+            token_id = None
+            target = None
+            if isinstance(message, (RotatePersonalTokenCommand, RevokePersonalTokenCommand)):
+                token_id = message.token_id
+                if tokens is None:
+                    raise SessionAuthenticationRejected()
+                # Token revocation and authentication acquire the token row first.
+                target = await tokens.lock_personal_token(token_id, user_id=message.actor_id)
+            principal = await authenticate(sessions, tokens)
+            if getattr(message, "actor_id", principal.user_id) != principal.user_id:
+                raise SessionAuthenticationRejected()
+
+            kind = "session"
+            owner_id: UUID | None = principal.user_id
+            resource_id = token_id
+            project_id = principal.project_id
+            role = principal.role
+            denied = AuthorizationDenied()
+            if isinstance(message, (ProfileQuery, SecurityHistoryQuery, UpdateProfileCommand)):
+                kind = "profile"
+            if isinstance(
+                message,
+                (
+                    CreatePersonalTokenCommand,
+                    ListPersonalTokensQuery,
+                    RotatePersonalTokenCommand,
+                    RevokePersonalTokenCommand,
+                ),
+            ):
+                kind = "token"
+            if token_id is not None:
+                owner_id = target.user_id if target is not None else None
+                if owner_id != principal.user_id:
+                    denied = AuthorizationDenied(404, "not_found", "Token not found")
+            if isinstance(message, CreatePersonalTokenCommand) and message.project_id != project_id:
+                raise SessionAuthenticationRejected()
+            if isinstance(message, RevokeSessionCommand):
+                resource_id = message.session_id
+            if isinstance(message, SelectActiveProjectCommand):
+                project_id = message.project_id
+                membership = next(
+                    (item for item in principal.memberships if item.project_id == project_id), None
+                )
+                if membership is None:
+                    raise SessionAuthenticationRejected()
+                role = membership.role
+
+            authorizer = await self._container.get(AuthorizationDecisionPort)
+            await require_authorized(
+                authorizer,
+                message,
+                AuthorizationRequest(
+                    principal.user_id,
+                    "",
+                    kind,
+                    resource_id,
+                    project_id,
+                    project_id,
+                    role,
+                    tuple(principal.scopes),
+                    owner_id,
+                ),
+                denied,
+            )
+            return principal
+
+        return check
 
     async def _dispatch_action(
         self,

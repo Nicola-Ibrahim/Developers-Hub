@@ -15,5 +15,5 @@ class ProjectAccessRepository(Protocol):
         self, *, actor_id: UUID, user_id: UUID, project_id: UUID, role: str | None, now: datetime
     ) -> None: ...
     async def list_project_members(
-        self, *, actor_id: UUID, project_id: UUID
+        self, *, project_id: UUID
     ) -> tuple[ProjectMemberDetails, ...]: ...

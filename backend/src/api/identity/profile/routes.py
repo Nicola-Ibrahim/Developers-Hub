@@ -5,11 +5,12 @@ from typing import Annotated
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Header, Request, Response
 
-from api.composition.identity_preconditions import browser_write_precondition, execute_browser_write
+from api.composition.identity_preconditions import (
+    browser_read_precondition,
+    browser_write_precondition,
+)
 from api.identity.authentication.credentials import (
     CSRF_HEADER,
-    browser_credentials,
-    require_cookie_session,
 )
 from api.identity.profile.schemas import ProfileView, SecurityActivityView, UpdateProfileBody
 from identity.application.interfaces.dispatch import IdentityModule
@@ -23,10 +24,17 @@ router = APIRouter()
 @router.get("/me/profile", response_model=ProfileView, tags=["identity"])
 @inject
 async def get_profile(
-    request: Request, response: Response, module: FromDishka[IdentityModule]
+    request: Request,
+    response: Response,
+    module: FromDishka[IdentityModule],
+    hasher: FromDishka[TokenHasher],
 ) -> ProfileView:
     response.headers["Cache-Control"] = "no-store"
-    profile = await module.query(ProfileQuery(require_cookie_session(browser_credentials(request))))
+    actor = request.state.identity_principal
+    query = ProfileQuery(actor.user_id)
+    profile = await module.query_with_precondition(
+        query, browser_read_precondition(request, actor.user_id, hasher)
+    )
     return ProfileView(
         userId=profile.user_id, userName=profile.user_name, displayName=profile.display_name
     )
@@ -46,9 +54,10 @@ async def patch_profile(
         request.state.identity_principal.user_id,
         body.display_name,
     )
-    profile = await execute_browser_write(module, command, browser_write_precondition(
-        request, request.state.identity_principal.user_id, hasher
-    ))
+    profile = await module.execute_with_precondition(
+        command,
+        browser_write_precondition(request, request.state.identity_principal.user_id, hasher),
+    )
     response.headers["Cache-Control"] = "no-store"
     return ProfileView(
         userId=profile.user_id, userName=profile.user_name, displayName=profile.display_name
@@ -58,11 +67,16 @@ async def patch_profile(
 @router.get("/me/security-history", response_model=list[SecurityActivityView], tags=["identity"])
 @inject
 async def security_history(
-    request: Request, response: Response, module: FromDishka[IdentityModule]
+    request: Request,
+    response: Response,
+    module: FromDishka[IdentityModule],
+    hasher: FromDishka[TokenHasher],
 ) -> list[SecurityActivityView]:
     response.headers["Cache-Control"] = "no-store"
-    items = await module.query(
-        SecurityHistoryQuery(require_cookie_session(browser_credentials(request)))
+    principal = request.state.identity_principal
+    query = SecurityHistoryQuery(principal.user_id)
+    items = await module.query_with_precondition(
+        query, browser_read_precondition(request, principal.user_id, hasher)
     )
     return [
         SecurityActivityView(

@@ -39,7 +39,9 @@ class ProcessGithubPreviewWebhookHandler:
         self.preview_owner_id = preview_owner_id
         self.preview_ttl_seconds = preview_ttl_seconds
 
-    async def execute(self, command: ProcessGithubPreviewWebhook) -> WebhookResult:
+    def verify_signature(
+        self, command: ProcessGithubPreviewWebhook
+    ) -> tuple[dict[str, object], str]:
         raw_body, signature = command.raw_body, command.signature
         delivery_id, event = command.delivery_id, command.event
         if delivery_id is None or event is None:
@@ -52,7 +54,28 @@ class ProcessGithubPreviewWebhookHandler:
             )
         if len(raw_body) > 1024 * 1024 or not re.fullmatch(r"[A-Fa-f0-9-]{16,100}", delivery_id):
             raise PlatformRequestError("webhook_invalid", "Webhook envelope is invalid", 400)
-        payload, payload_hash = self.webhook_verifier.verify(raw_body, signature)
+        return self.webhook_verifier.verify(raw_body, signature)
+
+    async def execute(self, command: ProcessGithubPreviewWebhook) -> WebhookResult:
+        return await self.execute_verified(command, self.verify_signature(command))
+
+    async def execute_verified(
+        self,
+        command: ProcessGithubPreviewWebhook,
+        verified: tuple[dict[str, object], str],
+    ) -> WebhookResult:
+        payload, payload_hash = verified
+        event = command.event
+        delivery_id = command.delivery_id
+        if delivery_id is None or event is None:
+            raise PlatformRequestError(
+                "webhook_invalid", "GitHub delivery headers are required", 400
+            )
+        allowed_repository_owner = self.allowed_repository_owner
+        if allowed_repository_owner is None:
+            raise PlatformRequestError(
+                "webhooks_disabled", "GitHub preview events are not configured", 503
+            )
         action = payload.get("action")
         repository_data = payload.get("repository")
         pull_request = payload.get("pull_request")
@@ -68,7 +91,7 @@ class ProcessGithubPreviewWebhookHandler:
         if not isinstance(repository, str) or not _safe_repository_name(repository):
             raise PlatformRequestError("webhook_invalid", "Repository identity is invalid", 400)
         owner, _ = repository.split("/", 1)
-        if owner.casefold() != self.allowed_repository_owner.casefold():
+        if owner.casefold() != allowed_repository_owner.casefold():
             raise PlatformRequestError("webhook_forbidden", "Repository is not approved", 403)
         number = pull_request.get("number")
         if not isinstance(number, int) or isinstance(number, bool) or number < 1:

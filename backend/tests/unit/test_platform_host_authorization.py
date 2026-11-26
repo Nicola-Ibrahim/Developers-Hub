@@ -17,7 +17,18 @@ from devops_platform.application.resource_management.get_resource.query import (
 from devops_platform.application.shared.errors import CatalogForbidden
 from devops_platform.domain.value_objects.access_context import AccessContext
 from identity.domain.interfaces.project_access import IdentityProjectAccess
+from shared.authorization.models import AuthorizationDecision
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
+
+
+class Authorizer:
+    def __init__(self, allowed: bool) -> None:
+        self.allowed = allowed
+        self.requests = []
+
+    async def evaluate(self, request):
+        self.requests.append(request)
+        return AuthorizationDecision(self.allowed)
 
 
 def test_http_host_rechecks_trusted_access_and_rolls_back_denial(monkeypatch) -> None:
@@ -26,8 +37,12 @@ def test_http_host_rechecks_trusted_access_and_rolls_back_denial(monkeypatch) ->
     trusted = AccessContext(uuid4(), project_id, "developer", frozenset())
     events: list[str] = []
 
+    class Session:
+        async def scalar(self, _statement):
+            return None
+
     class Unit:
-        session = object()
+        session = Session()
 
         async def run(self, operation, present):
             try:
@@ -71,7 +86,7 @@ def test_http_host_rechecks_trusted_access_and_rolls_back_denial(monkeypatch) ->
     monkeypatch.setattr("api.platform.module.authenticate_platform_access", authenticate)
     request = Request({"type": "http", "method": "GET", "path": "/"})
     request.state.request_identity = "private-token"
-    host = PlatformRequestModule(Container(), request, object())
+    host = PlatformRequestModule(Container(), request, object(), Authorizer(False))
 
     with pytest.raises(CatalogForbidden):
         asyncio.run(host.query(ReadResource(forged, uuid4())))
@@ -84,8 +99,12 @@ def test_http_host_dispatches_with_authenticated_actor_not_message_claims(monkey
     trusted = AccessContext(uuid4(), project_id, "developer", frozenset({"resources:read"}))
     events: list[str] = []
 
+    class Session:
+        async def scalar(self, _statement):
+            return None
+
     class Unit:
-        session = object()
+        session = Session()
 
         async def run(self, operation, present):
             result = await operation()
@@ -125,7 +144,10 @@ def test_http_host_dispatches_with_authenticated_actor_not_message_claims(monkey
     monkeypatch.setattr("api.platform.module.authenticate_platform_access", authenticate)
     request = Request({"type": "http", "method": "GET", "path": "/"})
     request.state.request_identity = "private-token"
-    host = PlatformRequestModule(Container(), request, object())
+    authorizer = Authorizer(True)
+    host = PlatformRequestModule(Container(), request, object(), authorizer)
 
     assert asyncio.run(host.query(ReadResource(forged, uuid4()))) == trusted
+    assert authorizer.requests[0].subject_id == trusted.user_id
+    assert authorizer.requests[0].scopes == ("resources:read",)
     assert events == ["authenticate", "dispatch", "commit"]

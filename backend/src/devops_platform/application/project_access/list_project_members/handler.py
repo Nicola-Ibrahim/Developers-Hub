@@ -10,6 +10,4 @@ class ListProjectMembersHandler:
         self.repository = repository
 
     async def execute(self, query: ListProjectMembers) -> tuple[ProjectMemberDetails, ...]:
-        return await self.repository.list_project_members(
-            actor_id=query.access.user_id, project_id=query.project_id
-        )
+        return await self.repository.list_project_members(project_id=query.project_id)

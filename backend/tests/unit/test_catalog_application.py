@@ -7,8 +7,7 @@ from uuid import UUID
 from devops_platform.application.resource_management.catalog.handler import ReadCatalogQueryHandler
 from devops_platform.application.resource_management.catalog.query import ReadCatalog
 from devops_platform.application.shared.dto import AccessContext
-from devops_platform.application.shared.errors import CatalogForbidden
-from devops_platform.authorization import ALL_SCOPES, authorize_platform_action
+from devops_platform.authorization import ALL_SCOPES
 
 
 class ReadCatalogTests(unittest.TestCase):
@@ -31,20 +30,6 @@ class ReadCatalogTests(unittest.TestCase):
             result.message,
             "No verified provisioning provider is enabled; requests are disabled",
         )
-
-    def test_denies_missing_scope_even_for_admin(self) -> None:
-        admin = AccessContext(
-            user_id=self.access.user_id,
-            project_id=self.project_id,
-            role="admin",
-            scopes=frozenset(),
-        )
-
-        with self.assertRaises(CatalogForbidden) as caught:
-            authorize_platform_action(ReadCatalog(admin))
-
-        self.assertEqual(caught.exception.code, "forbidden")
-        self.assertEqual(caught.exception.message, "The token does not permit this action")
 
     def test_permission_vocabulary_is_preserved(self) -> None:
         self.assertEqual(

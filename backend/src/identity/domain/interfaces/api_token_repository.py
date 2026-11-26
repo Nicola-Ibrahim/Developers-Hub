@@ -51,7 +51,9 @@ class ApiTokenRepository(Protocol):
         allowed_scopes: tuple[str, ...],
     ) -> PersonalApiToken | None: ...
 
-    async def lock_personal_token(self, token_id: UUID) -> ApiTokenStatus | None: ...
+    async def lock_personal_token(
+        self, token_id: UUID, *, user_id: UUID | None = None
+    ) -> ApiTokenStatus | None: ...
 
     async def revoke_personal_token(
         self, *, user_id: UUID, token_id: UUID, now: datetime

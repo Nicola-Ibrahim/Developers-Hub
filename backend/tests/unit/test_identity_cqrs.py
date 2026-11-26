@@ -83,12 +83,12 @@ def test_membership_command_validates_project_role_before_persistence() -> None:
         )
 
 
-def test_project_member_query_is_read_only_and_receives_authorized_actor() -> None:
+def test_project_member_query_is_read_only_and_project_scoped() -> None:
     actor_id, project_id = uuid4(), uuid4()
 
     class ReadRepository:
-        async def list_project_members(self, *, actor_id, project_id):
-            self.values = (actor_id, project_id)
+        async def list_project_members(self, *, project_id):
+            self.project_id = project_id
             return ()
 
     repository = ReadRepository()
@@ -102,7 +102,7 @@ def test_project_member_query_is_read_only_and_receives_authorized_actor() -> No
     )
 
     assert result == ()
-    assert repository.values == (actor_id, project_id)
+    assert repository.project_id == project_id
 
 
 def test_session_refresh_is_explicitly_a_command(monkeypatch) -> None:

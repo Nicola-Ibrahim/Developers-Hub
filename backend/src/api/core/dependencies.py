@@ -25,9 +25,7 @@ async def current_principal(
 ) -> PrincipalView:
     if isinstance(credentials, BrowserCredentials):
         principal = await identity.query(
-            AuthenticateSessionQuery(
-                require_cookie_session(credentials), credentials.project_id
-            )
+            AuthenticateSessionQuery(require_cookie_session(credentials), credentials.project_id)
         )
         if principal.project_id is None or principal.role not in {"developer", "admin"}:
             raise PlatformRequestError("project_required", "Select an authorized project", 409)

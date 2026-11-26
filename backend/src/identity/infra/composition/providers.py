@@ -1,9 +1,7 @@
 """Declarative bindings; this is the only layer selecting concrete implementations."""
 
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
-import httpx
 from dishka import AsyncContainer, Provider, Scope, provide
 
 from identity.application.accounts.change_password.handler import ChangePasswordHandler
@@ -18,13 +16,11 @@ from identity.application.api_tokens.authenticate_api_token.handler import (
 )
 from identity.application.api_tokens.revoke_api_token.handler import RevokeApiTokenHandler
 from identity.application.authentication.login.handler import LoginHandler
-from identity.application.interfaces.authorization import AuthorizationDecisionPort
 from identity.application.interfaces.dispatch import IdentityModule
 from identity.application.interfaces.identity_transactions import IdentityTransaction
 from identity.application.interfaces.security import PasswordHasher, TokenGenerator, TokenHasher
 from identity.application.interfaces.session_tokens import SessionTokenVerifier
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
-from identity.infra.authorization.opa import OpaAuthorizationClient
 from identity.infra.composition.module import IdentityModuleDispatcher
 from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
 from identity.infra.security.jwt import JwtSessionTokens
@@ -81,17 +77,6 @@ class IdentityProvider(Provider):
     def identity_module(self, container: AsyncContainer) -> IdentityModule:
         return IdentityModuleDispatcher(container)
 
-    @provide(scope=Scope.APP)
-    async def opa_http_client(self) -> AsyncIterator[httpx.AsyncClient]:
-        async with httpx.AsyncClient(trust_env=False) as client:
-            yield client
-
-    @provide(scope=Scope.REQUEST, provides=AuthorizationDecisionPort)
-    def authorization_decisions(
-        self, client: httpx.AsyncClient, settings: Settings
-    ) -> OpaAuthorizationClient:
-        return OpaAuthorizationClient(settings.opa_url, client)
-
     @provide(scope=Scope.REQUEST)
     def change_password(
         self,
@@ -108,14 +93,12 @@ class IdentityProvider(Provider):
         generator: TokenGenerator,
         token_hasher: TokenHasher,
         session_token_issuer: JwtSessionTokens,
-        settings: Settings,
     ) -> LoginHandler:
         return LoginHandler(
             transaction,
             passwords,
             generator,
             token_hasher,
-            settings.browser_allowed_origins,
             session_token_issuer,
         )
 

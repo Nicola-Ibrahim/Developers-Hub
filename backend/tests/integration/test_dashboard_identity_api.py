@@ -1,9 +1,22 @@
 """Dashboard-facing identity contracts against isolated PostgreSQL schemas."""
 
-import pytest
-from test_browser_identity_postgres import ORIGIN, PASSWORD, PEPPER, seed_user
-from test_foundation_postgres import client_for
+import asyncio
 
+import pytest
+from dishka import Provider, Scope, provide
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+from test_browser_identity_postgres import ORIGIN, PASSWORD, PEPPER, seed_user
+from test_foundation_postgres import async_engine_for, client_for
+
+from api.app import create_app
+from composition.container import BackendContainer
+from devops_platform.application.resource_management.catalog.query import ReadCatalog
+from identity.application.profile.update_profile import UpdateProfileCommand
+from identity.infra.persistence.models.user import InternalUserRow
+from shared.authorization.dispatch import operation_id
+from shared.authorization.interfaces import AuthorizationDecisionPort, AuthorizationUnavailable
+from shared.authorization.models import AuthorizationDecision
 from shared.infra.settings import Settings
 
 pytestmark = pytest.mark.postgres
@@ -126,3 +139,49 @@ def test_membership_administration_enforces_role_project_and_admin_retention(pos
         assert admin.delete(f"{route}/{member_id}", headers=headers).status_code == 204
         assert member.get(route).status_code == 401
         assert len(admin.get(route).json()) == 1
+
+
+@pytest.mark.parametrize("unavailable, expected", [(False, 403), (True, 503)])
+def test_shared_policy_denies_identity_and_platform_without_fallback(
+    postgres_engine, unavailable, expected
+):
+    user_id, project_id, name = seed_user(postgres_engine)
+    calls = []
+
+    class Decisions:
+        async def evaluate(self, request):
+            calls.append(request)
+            if unavailable:
+                raise AuthorizationUnavailable()
+            return AuthorizationDecision(False, "authorization-v1")
+
+    class Bindings(Provider):
+        @provide(scope=Scope.APP, override=True)
+        def decisions(self) -> AuthorizationDecisionPort:
+            return Decisions()
+
+    engine = async_engine_for(postgres_engine)
+    settings = config()
+    container = BackendContainer(settings, engine=engine, overrides=(Bindings(),)).api()
+    try:
+        with TestClient(create_app(settings, engine=engine, container=container)) as client:
+            assert client.get("/api/v1/templates").status_code == 200
+            headers = login(client, name, project_id)
+            assert calls == []
+            profile = client.patch(
+                "/api/v1/me/profile", headers=headers, json={"displayName": "Must not persist"}
+            )
+            catalog = client.get("/api/v1/catalog")
+            assert profile.status_code == catalog.status_code == expected
+            assert [request.action for request in calls] == [
+                operation_id(UpdateProfileCommand),
+                operation_id(ReadCatalog),
+            ]
+            assert all(request.subject_id == user_id for request in calls)
+    finally:
+        asyncio.run(container.close())
+        asyncio.run(engine.dispose())
+
+    with Session(postgres_engine) as session:
+        record = session.get(InternalUserRow, user_id)
+        assert record is not None and record.display_name is None

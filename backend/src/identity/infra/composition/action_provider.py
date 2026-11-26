@@ -115,25 +115,21 @@ class IdentityActionProvider(Provider):
         hasher: Annotated[TokenHasher, FromComponent("")],
         settings: Annotated[Settings, FromComponent("")],
     ) -> LogoutHandler:
-        return LogoutHandler(repository, hasher, settings.browser_allowed_origins)
+        return LogoutHandler(repository, hasher)
 
     @provide(scope=Scope.ACTION)
     def revoke_all_sessions_handler(
         self,
         repository: SessionRepository,
-        hasher: Annotated[TokenHasher, FromComponent("")],
-        settings: Annotated[Settings, FromComponent("")],
     ) -> RevokeAllSessionsHandler:
-        return RevokeAllSessionsHandler(repository, hasher, settings.browser_allowed_origins)
+        return RevokeAllSessionsHandler(repository)
 
     @provide(scope=Scope.ACTION)
     def revoke_session_handler(
         self,
         repository: SessionRepository,
-        hasher: Annotated[TokenHasher, FromComponent("")],
-        settings: Annotated[Settings, FromComponent("")],
     ) -> RevokeSessionHandler:
-        return RevokeSessionHandler(repository, hasher, settings.browser_allowed_origins)
+        return RevokeSessionHandler(repository)
 
     @provide(scope=Scope.ACTION)
     def authenticate_session_handler(
@@ -147,9 +143,8 @@ class IdentityActionProvider(Provider):
     def list_sessions_handler(
         self,
         repository: SessionRepository,
-        hasher: Annotated[TokenHasher, FromComponent("")],
     ) -> ListSessionsHandler:
-        return ListSessionsHandler(repository, hasher)
+        return ListSessionsHandler(repository)
 
     @provide(scope=Scope.ACTION)
     def update_profile_handler(
@@ -162,19 +157,15 @@ class IdentityActionProvider(Provider):
     def read_profile_handler(
         self,
         users: UserRepository,
-        repository: SessionRepository,
-        hasher: Annotated[TokenHasher, FromComponent("")],
     ) -> ReadProfileHandler:
-        return ReadProfileHandler(users, repository, hasher)
+        return ReadProfileHandler(users)
 
     @provide(scope=Scope.ACTION)
     def security_history_handler(
         self,
         users: UserRepository,
-        repository: SessionRepository,
-        hasher: Annotated[TokenHasher, FromComponent("")],
     ) -> SecurityHistoryHandler:
-        return SecurityHistoryHandler(users, repository, hasher)
+        return SecurityHistoryHandler(users)
 
     @provide(scope=Scope.ACTION)
     def rotate_csrf_handler(
@@ -193,6 +184,4 @@ class IdentityActionProvider(Provider):
         generator: Annotated[TokenGenerator, FromComponent("")],
         settings: Annotated[Settings, FromComponent("")],
     ) -> SelectActiveProjectHandler:
-        return SelectActiveProjectHandler(
-            repository, hasher, generator, settings.browser_allowed_origins
-        )
+        return SelectActiveProjectHandler(repository, hasher, generator)

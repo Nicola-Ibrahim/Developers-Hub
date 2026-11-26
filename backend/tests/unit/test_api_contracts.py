@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from api.app import create_app
 from api.platform.resources.schemas import RenewRequest, ResourceRequest, ResourceView
-from api.settings.config import APISettings, get_api_settings
+from api.settings.config import APISettings, BrowserCookiePolicy, get_api_settings
 from devops_platform.application.interfaces.module import DeveloperPlatformModule
 from devops_platform.application.resource_management.catalog.handler import ReadCatalogQueryHandler
 from devops_platform.application.resource_management.catalog.query import ReadCatalog
@@ -24,12 +24,19 @@ from identity.application.interfaces.session_tokens import SessionTokenVerifier
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.infra.security.opaque_secrets import token_digest
 from shared.application.interfaces.readiness import ReadinessProbe
+from shared.authorization.interfaces import AuthorizationDecisionPort
+from shared.authorization.models import AuthorizationDecision
 from shared.infra.settings import Settings
 
 
 class RejectBrowserSessionTokens:
     def verify(self, token: str) -> bool:
         return False
+
+
+class AllowAuthorization:
+    async def evaluate(self, request):
+        return AuthorizationDecision(True, "unit-test")
 
 
 def settings():
@@ -279,8 +286,16 @@ def test_http_transport_works_with_fake_application_ports():
             return Ready()
 
         @provide(scope=Scope.APP)
+        def authorization(self) -> AuthorizationDecisionPort:
+            return AllowAuthorization()
+
+        @provide(scope=Scope.APP)
         def session_tokens(self) -> SessionTokenVerifier:
             return RejectBrowserSessionTokens()
+
+        @provide(scope=Scope.APP)
+        def browser_cookie_policy(self) -> BrowserCookiePolicy:
+            return BrowserCookiePolicy(False)
 
     container = make_async_container(FakeCapabilities(), FastapiProvider())
     with TestClient(create_app(container=container)) as client:

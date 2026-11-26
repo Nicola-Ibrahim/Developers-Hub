@@ -1,4 +1,4 @@
-"""Browser write preconditions executed inside Identity ACTION transactions."""
+"""Revalidate cookie credentials within the protected Identity transaction."""
 
 from datetime import UTC, datetime
 from uuid import UUID
@@ -7,7 +7,7 @@ from fastapi import Request
 
 from api.core.errors import APIError
 from api.identity.authentication.credentials import browser_credentials, require_cookie_session
-from identity.application.interfaces.dispatch import ActionPrecondition, IdentityModule
+from identity.application.interfaces.dispatch import ActionPrecondition
 from identity.application.interfaces.security import TokenHasher
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.interfaces.session_repository import SessionRepository
@@ -15,47 +15,44 @@ from identity.domain.records import SessionPrincipal
 
 
 def browser_write_precondition(
-    request: Request,
-    actor_id: UUID,
-    hasher: TokenHasher,
-    *,
-    token_id: UUID | None = None,
-    expected_project_id: UUID | None = None,
-    check_project: bool = False,
+    request: Request, actor_id: UUID, hasher: TokenHasher
+) -> ActionPrecondition:
+    return _session_precondition(request, actor_id, hasher, verify_csrf=True)
+
+
+def browser_read_precondition(
+    request: Request, actor_id: UUID, hasher: TokenHasher
+) -> ActionPrecondition:
+    return _session_precondition(request, actor_id, hasher, verify_csrf=False)
+
+
+def _session_precondition(
+    request: Request, actor_id: UUID, hasher: TokenHasher, *, verify_csrf: bool
 ) -> ActionPrecondition:
     credentials = browser_credentials(request)
+    digest = hasher.digest(require_cookie_session(credentials))
+    csrf_token = credentials.csrf_token
 
     async def check(
-        sessions: SessionRepository, tokens: ApiTokenRepository
+        sessions: SessionRepository, _tokens: ApiTokenRepository | None
     ) -> SessionPrincipal:
-        if token_id is not None:
-            await tokens.lock_personal_token(token_id)
-        digest = hasher.digest(require_cookie_session(credentials))
         principal = await sessions.authorize_session_operation(
-            digest, None, datetime.now(UTC), lock_for_mutation=True
+            digest, None, datetime.now(UTC), lock_for_mutation=verify_csrf
         )
-        csrf = credentials.csrf_token
         if (
             principal is None
             or principal.user_id != actor_id
-            or csrf is None
-            or not await sessions.validate_csrf(digest, hasher.digest(csrf))
+            or (
+                verify_csrf
+                and (
+                    csrf_token is None
+                    or not await sessions.validate_csrf(digest, hasher.digest(csrf_token))
+                )
+            )
         ):
             raise APIError(
-                401,
-                "authentication_rejected",
-                "Credentials or browser session are invalid",
-            )
-        if check_project and principal.project_id != expected_project_id:
-            raise APIError(
-                401,
-                "authentication_rejected",
-                "Credentials or browser session are invalid",
+                401, "authentication_rejected", "Credentials or browser session are invalid"
             )
         return principal
 
     return check
-
-
-async def execute_browser_write(module: IdentityModule, command, precondition: ActionPrecondition):
-    return await module.execute_with_precondition(command, precondition)

@@ -133,7 +133,7 @@ class IdentityFixture:
                 lambda _users, repository: RotateCsrfHandler(repository, hasher, tokens)
             ),
             LogoutCommand: self._action_handler(
-                lambda _users, repository: LogoutHandler(repository, hasher, (ORIGIN,))
+                lambda _users, repository: LogoutHandler(repository, hasher)
             ),
         }
 
@@ -165,10 +165,10 @@ class IdentityFixture:
                 now=self.clock(),
             )
 
-    async def list_project_members(self, actor_id, project_id):
+    async def list_project_members(self, _actor_id, project_id):
         async with self.sessions() as session, session.begin():
             return await project_access_repository_for_session(session).list_project_members(
-                actor_id=actor_id, project_id=project_id
+                project_id=project_id
             )
 
 
@@ -241,9 +241,7 @@ def test_password_change_during_login_verification_blocks_stale_session(postgres
                 return super().verify(password, encoded)
 
         identity.handlers[LoginCommand].passwords = PausedHasher()
-        login = asyncio.create_task(
-            perform_login(identity, user_name, PASSWORD, project_id)
-        )
+        login = asyncio.create_task(perform_login(identity, user_name, PASSWORD, project_id))
         try:
             try:
                 await asyncio.wait_for(verification_started.wait(), 5)
@@ -301,10 +299,8 @@ def test_browser_session_survives_service_restart_and_revokes_on_password_reset(
         assert principal.session_id == login.principal.session_id
         assert principal.project_id == project_id
 
-        current = await restarted.execute(RotateCsrfCommand(login.session_token))
-        with pytest.raises(SessionAuthenticationRejected):
-            await restarted.execute(LogoutCommand(login.session_token, login.csrf_token, ORIGIN))
-        await restarted.execute(LogoutCommand(login.session_token, current.csrf_token, ORIGIN))
+        await restarted.execute(RotateCsrfCommand(login.session_token))
+        await restarted.execute(LogoutCommand(login.session_token))
         with pytest.raises(SessionAuthenticationRejected):
             await restarted.execute(AuthenticateSessionQuery(login.session_token))
 
@@ -318,9 +314,7 @@ def test_browser_session_survives_service_restart_and_revokes_on_password_reset(
         )
         with pytest.raises(SessionAuthenticationRejected):
             await restarted.execute(AuthenticateSessionQuery(login.session_token))
-        changed = await perform_login(
-            restarted, user_name, "new-local-safe-password", project_id
-        )
+        changed = await perform_login(restarted, user_name, "new-local-safe-password", project_id)
         assert changed.principal.user_id == user_id
 
         with Session(postgres_engine) as session:
@@ -656,7 +650,7 @@ def test_revocation_during_authority_lock_wait_is_revalidated(
         await asyncio.wait_for(discovered.wait(), timeout=5)
         try:
             await asyncio.wait_for(
-                service.execute(LogoutCommand(login.session_token, login.csrf_token, ORIGIN)),
+                service.execute(LogoutCommand(login.session_token)),
                 timeout=5,
             )
         finally:

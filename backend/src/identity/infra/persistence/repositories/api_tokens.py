@@ -133,13 +133,14 @@ class SQLAlchemyApiTokenRepository:
         except SQLAlchemyError as exc:
             raise IdentityUnavailable() from exc
 
-    async def lock_personal_token(self, token_id: UUID) -> ApiTokenStatus | None:
+    async def lock_personal_token(
+        self, token_id: UUID, *, user_id: UUID | None = None
+    ) -> ApiTokenStatus | None:
         try:
-            row = await self._session.scalar(
-                select(ApiAccessTokenRow)
-                .where(ApiAccessTokenRow.id == token_id)
-                .with_for_update(of=ApiAccessTokenRow)
-            )
+            query = select(ApiAccessTokenRow).where(ApiAccessTokenRow.id == token_id)
+            if user_id is not None:
+                query = query.where(ApiAccessTokenRow.user_id == user_id)
+            row = await self._session.scalar(query.with_for_update(of=ApiAccessTokenRow))
             if row is None:
                 return None
             return ApiTokenStatus(row.id, row.user_id, row.project_id, row.revoked_at)

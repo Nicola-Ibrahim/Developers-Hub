@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from api.app import create_app
 from api.platform.resources.schemas import AcceptedOperation, ResourceRequest
+from api.settings.config import BrowserCookiePolicy
 from devops_platform.application.interfaces.module import DeveloperPlatformModule
 from devops_platform.application.projects.get_project.query import (
     ReadProject,
@@ -48,6 +49,8 @@ from identity.application.interfaces.session_tokens import SessionTokenVerifier
 from identity.contracts import AuthenticatedPrincipal
 from identity.domain.errors import AuthenticationRejected
 from identity.domain.records import MembershipDetails, SessionPrincipal
+from shared.authorization.interfaces import AuthorizationDecisionPort
+from shared.authorization.models import AuthorizationDecision
 
 PROJECT_ID = UUID("11111111-1111-4111-8111-111111111111")
 ENVIRONMENT_ID = UUID("22222222-2222-4222-8222-222222222222")
@@ -222,6 +225,18 @@ class ApiOnlyPlatformProvider(Provider):
     @provide(scope=Scope.APP)
     def session_tokens(self) -> SessionTokenVerifier:
         return FakeSessionTokenVerifier()
+
+    @provide(scope=Scope.APP)
+    def cookie_policy(self) -> BrowserCookiePolicy:
+        return BrowserCookiePolicy(False)
+
+    @provide(scope=Scope.APP)
+    def authorization(self) -> AuthorizationDecisionPort:
+        class Allow:
+            async def evaluate(self, request):
+                return AuthorizationDecision(True, "unit-test")
+
+        return Allow()
 
 
 class FakeSessionTokenVerifier:

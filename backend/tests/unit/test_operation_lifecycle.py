@@ -23,6 +23,7 @@ from identity.application.shared.errors import IdentityUnavailable
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.records import ApiTokenStatus
+from identity.infra.composition.api_token_transactions import SqlAlchemyApiTokenTransaction
 from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
@@ -280,15 +281,18 @@ def test_uow_rejects_concurrent_reuse_while_first_operation_is_active():
 
 def test_uow_rolls_back_token_operation_when_sql_commit_fails():
     session = FakeSession(fail_commit=SQLAlchemyError("database detail"))
-    unit = SqlAlchemyUnitOfWork(cast(AsyncSession, session))
+    transaction = SqlAlchemyApiTokenTransaction(
+        cast(async_sessionmaker[AsyncSession], lambda: session),
+        lambda _session: cast(ApiTokenRepository, object()),
+    )
     writes = []
 
-    async def issue_token():
+    async def issue_token(_repository):
         writes.append("token")
         return TOKEN
 
     with pytest.raises(IdentityUnavailable) as caught:
-        asyncio.run(unit.run(issue_token, lambda value: value))
+        asyncio.run(transaction.run(issue_token))
     assert caught.value.__cause__.__class__ is DatabaseUnavailable
     assert "database detail" not in str(caught.value)
     assert writes == ["token"]

@@ -16,21 +16,17 @@ from devops_platform.application.resource_management.read_connection.query impor
     ReadDatabaseConnection,
 )
 from devops_platform.application.shared.dto import AccessContext
-from devops_platform.application.shared.errors import CatalogForbidden, PlatformRequestError
-from devops_platform.authorization import authorize_platform_action
+from devops_platform.application.shared.errors import PlatformRequestError
 
 
-def test_connection_requires_scope_and_cipher_before_sensitive_read():
+def test_connection_handler_requires_cipher_before_sensitive_read():
     class Repository:
         async def connection(self, **_kwargs):
             raise AssertionError("Unauthorized connection read reached persistence")
 
     project_id, user_id, resource_id = uuid4(), uuid4(), uuid4()
-    forbidden = AccessContext(user_id, project_id, "developer", frozenset())
     allowed = AccessContext(user_id, project_id, "developer", frozenset({"connections:read"}))
 
-    with pytest.raises(CatalogForbidden):
-        authorize_platform_action(ReadDatabaseConnection(forbidden, resource_id))
     with pytest.raises(PlatformRequestError) as error:
         asyncio.run(
             GetDatabaseConnectionQueryHandler(Repository(), None).execute(

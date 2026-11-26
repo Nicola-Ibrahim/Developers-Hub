@@ -1045,7 +1045,9 @@ class SQLAlchemyApplicationDeliveryRepository:
             step.status = "pending"
             step.next_attempt_at = now + timedelta(seconds=min(300, 2 ** min(step.attempts, 8)))
             app.status = "deleting"
-        elif retryable and (step.attempts < 5 or error_code == "application_busy"):
+        elif retryable and (
+            step.attempts < 5 or error_code in {"application_busy", "authorization_unavailable"}
+        ):
             step.status = "pending"
             step.next_attempt_at = now + timedelta(seconds=retry_after_seconds)
         else:
@@ -1113,7 +1115,7 @@ class SQLAlchemyApplicationDeliveryRepository:
             )
             .with_for_update(read=not write)
         )
-        if app is None or (access.user_id != app.owner_id and access.role != "admin"):
+        if app is None:
             raise PlatformRequestError("application_not_found", "Application was not found", 404)
         if write and not allow_closed and app.status in {"deleting", "deleted"}:
             raise PlatformRequestError(

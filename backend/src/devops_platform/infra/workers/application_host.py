@@ -28,6 +28,7 @@ from devops_platform.application.software_delivery.shared.models import (
 from devops_platform.infra.persistence.repositories.delivery import (
     SQLAlchemyApplicationDeliveryRepository,
 )
+from shared.authorization.interfaces import AuthorizationUnavailable
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork
 
 T = TypeVar("T")
@@ -83,6 +84,8 @@ class ApplicationDeliveryHost:
     async def _execute_and_complete(self, claim: DeliveryClaim) -> None:
         try:
             result = await self._effect_executor().execute(claim)
+        except AuthorizationUnavailable:
+            await self._record_failure(claim, "authorization_unavailable", True)
         except ApplicationDeliveryFailure as error:
             await self._record_failure(claim, error.code, error.retryable)
         except asyncio.CancelledError:

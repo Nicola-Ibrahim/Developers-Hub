@@ -1,11 +1,12 @@
 """HTTP adapter for the OPA decision API."""
 
+import asyncio
 from urllib.parse import urlsplit
 
 import httpx
 
-from identity.application.authorization.models import AuthorizationDecision, AuthorizationRequest
-from identity.application.interfaces.authorization import AuthorizationUnavailable
+from shared.authorization.interfaces import AuthorizationUnavailable
+from shared.authorization.models import AuthorizationDecision, AuthorizationRequest
 
 
 class OpaAuthorizationClient:
@@ -13,7 +14,7 @@ class OpaAuthorizationClient:
         parsed = urlsplit(base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("OPA endpoint must be an HTTP URL")
-        self._url = base_url.rstrip("/") + "/v1/data/devops/identity/decision"
+        self._url = base_url.rstrip("/") + "/v1/data/devops/authorization/decision"
         self._client = client
         self._timeout = timeout
 
@@ -38,17 +39,21 @@ class OpaAuthorizationClient:
             }
         }
         try:
-            response = await self._client.post(self._url, json=payload, timeout=self._timeout)
+            async with asyncio.timeout(self._timeout):
+                response = await self._client.post(self._url, json=payload, timeout=self._timeout)
             response.raise_for_status()
             body = response.json()
             result = body.get("result") if isinstance(body, dict) else None
             if not isinstance(result, dict) or type(result.get("allow")) is not bool:
                 raise AuthorizationUnavailable("OPA returned an invalid decision")
             revision = result.get("policy_revision")
-            if revision is not None and not isinstance(revision, str):
+            if not isinstance(revision, str) or not revision:
                 raise AuthorizationUnavailable("OPA returned an invalid decision")
-            return AuthorizationDecision(result["allow"], revision)
+            reason = result.get("reason")
+            if reason is not None and (not isinstance(reason, str) or not reason):
+                raise AuthorizationUnavailable("OPA returned an invalid decision")
+            return AuthorizationDecision(result["allow"], revision, reason)
         except AuthorizationUnavailable:
             raise
-        except (httpx.HTTPError, ValueError, TypeError) as exc:
+        except (httpx.HTTPError, TimeoutError, ValueError, TypeError) as exc:
             raise AuthorizationUnavailable("OPA decision is unavailable") from exc

@@ -43,7 +43,6 @@ from devops_platform.application.resource_management.submit_database_request.com
     RequestTemporaryDatabase,
 )
 from devops_platform.application.shared.dto import AccessContext
-from devops_platform.authorization import authorize_platform_action
 
 router = APIRouter()
 Access = Annotated[AccessContext, Depends(platform_access)]
@@ -63,7 +62,6 @@ async def request_database(
     message = RequestTemporaryDatabase(
         access, DatabaseRequest(**command.model_dump()), idempotency_key, datetime.now(UTC)
     )
-    authorize_platform_action(message)
     result = await module.execute(message)
     response.headers["Location"] = f"/api/v1/operations/{result.operation_id}"
     return AcceptedOperation(**asdict(result))
@@ -79,7 +77,6 @@ async def resources(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> ResourcePage:
     message = ReadResources(access, project_id, after, limit)
-    authorize_platform_action(message)
     results = await module.query(message)
     return ResourcePage(
         items=[ResourceView.model_validate(asdict(item)) for item in results],
@@ -93,7 +90,6 @@ async def resource(
     resource_id: UUID, access: Access, module: FromDishka[DeveloperPlatformModule]
 ) -> ResourceView:
     message = ReadResource(access, resource_id)
-    authorize_platform_action(message)
     result = await module.query(message)
     return ResourceView.model_validate(asdict(result))
 
@@ -107,7 +103,6 @@ async def renew(
     module: FromDishka[DeveloperPlatformModule],
 ) -> ResourceView:
     message = RenewDatabase(access, resource_id, command.expected_revision, command.expires_at)
-    authorize_platform_action(message)
     row = await module.execute(message)
     return ResourceView.model_validate(asdict(row))
 
@@ -123,7 +118,6 @@ async def delete_resource(
     resource_id: UUID, access: Access, module: FromDishka[DeveloperPlatformModule]
 ) -> AcceptedOperation:
     message = DeleteDatabase(access, resource_id)
-    authorize_platform_action(message)
     operation_id = await module.execute(message)
     return AcceptedOperation(resource_id=resource_id, operation_id=operation_id)
 
@@ -136,7 +130,6 @@ async def connection(
     resource_id: UUID, access: Access, module: FromDishka[DeveloperPlatformModule]
 ) -> ConnectionView:
     message = ReadDatabaseConnection(access, resource_id)
-    authorize_platform_action(message)
     result = await module.query(message)
     return ConnectionView.model_validate(asdict(result))
 
@@ -147,6 +140,5 @@ async def activity(
     project_id: UUID, access: Access, module: FromDishka[DeveloperPlatformModule]
 ) -> ActivityPage:
     message = ReadResourceActivity(access, project_id)
-    authorize_platform_action(message)
     rows = await module.query(message)
     return ActivityPage(items=[ActivityView.model_validate(asdict(row)) for row in rows])

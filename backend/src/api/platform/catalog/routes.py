@@ -11,7 +11,6 @@ from api.platform.catalog.schemas import CatalogResponse, PostgresOptionView
 from devops_platform.application.interfaces.module import DeveloperPlatformModule
 from devops_platform.application.resource_management.catalog.query import ReadCatalog
 from devops_platform.application.shared.dto import AccessContext
-from devops_platform.authorization import authorize_platform_action
 
 router = APIRouter()
 Access = Annotated[AccessContext, Depends(platform_access)]
@@ -21,7 +20,6 @@ Access = Annotated[AccessContext, Depends(platform_access)]
 @inject
 async def catalog(access: Access, module: FromDishka[DeveloperPlatformModule]) -> CatalogResponse:
     message = ReadCatalog(access)
-    authorize_platform_action(message)
     result = await module.query(message)
     return CatalogResponse(
         project_id=result.project_id,

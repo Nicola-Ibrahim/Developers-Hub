@@ -35,8 +35,19 @@ from devops_platform.infra.providers.application_runtime import (
     managed_resource_container_name,
 )
 from devops_platform.infra.security.credentials import FernetResourceCredentialCipher
+from shared.authorization.models import AuthorizationDecision
 
 pytestmark = pytest.mark.postgres
+
+
+class _AllowAuthorizer:
+    def __init__(self, allowed: bool = True) -> None:
+        self.allowed = allowed
+        self.requests = []
+
+    async def evaluate(self, _request):
+        self.requests.append(_request)
+        return AuthorizationDecision(self.allowed)
 
 
 async def _wait_until_binding_is_lock_blocked(database: AsyncEngine, application_name: str) -> None:
@@ -63,6 +74,7 @@ def test_binding_samples_resource_lease_after_application_lock(postgres_engine):
     _, token = issue(
         postgres_engine,
         project=f"binding-lease-{uuid4().hex}",
+        scopes=("resources:read",),
     )
     with client_for(postgres_engine) as client:
         project = client.get(
@@ -178,7 +190,7 @@ def test_binding_samples_resource_lease_after_application_lock(postgres_engine):
 def test_attachment_replays_and_cleanup_keeps_reservation_until_worker_confirms(
     postgres_engine,
 ):
-    _, token = issue(postgres_engine)
+    _, token = issue(postgres_engine, scopes=("resources:read",))
     with client_for(postgres_engine) as client:
         project = client.get(
             "/api/v1/projects", headers={"Authorization": "Bearer " + token}
@@ -201,10 +213,12 @@ def test_attachment_replays_and_cleanup_keeps_reservation_until_worker_confirms(
             )
         )
     database = async_engine_for(postgres_engine)
+    authorizer = _AllowAuthorizer()
     adapter = LedgerApplicationResources(
         async_sessionmaker(database, expire_on_commit=False),
         ApprovedPostgresCatalog((PostgresOption(requestable=True, unavailable_reason=None),)),
         uuid4(),
+        authorizer,
     )
 
     async def exercise():
@@ -215,8 +229,27 @@ def test_attachment_replays_and_cleanup_keeps_reservation_until_worker_confirms(
             command=ResourceAttachmentSpec("postgres", "16", "local", "small", 3600),
             idempotency_key="application:resource:stable-key",
         )
+        deny_authorizer = _AllowAuthorizer(False)
+        denied_adapter = LedgerApplicationResources(
+            async_sessionmaker(database, expire_on_commit=False),
+            adapter.catalog,
+            adapter.installation_id,
+            deny_authorizer,
+        )
+        with pytest.raises(ApplicationDeliveryFailure, match="resource_owner_not_authorized"):
+            await denied_adapter.request(**kwargs)
+        assert len(deny_authorizer.requests) == 1
+        with Session(postgres_engine) as session:
+            assert session.scalar(select(func.count()).select_from(Resource)) == 0
+
         first = await adapter.request(**kwargs)
         assert await adapter.request(**kwargs) == first
+        assert len(authorizer.requests) == 2
+        expected_action = (
+            "devops_platform.application.resource_management.submit_database_request.command."
+            "RequestTemporaryDatabase"
+        )
+        assert all(request.action == expected_action for request in authorizer.requests)
         assert not await adapter.ready(project_id, first)
         with pytest.raises(ApplicationDeliveryFailure, match="resource_cleanup_pending"):
             await adapter.delete(project_id, owner, first, "cleanup")

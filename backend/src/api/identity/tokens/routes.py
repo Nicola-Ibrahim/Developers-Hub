@@ -7,7 +7,10 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Header, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from api.composition.identity_preconditions import browser_write_precondition, execute_browser_write
+from api.composition.identity_preconditions import (
+    browser_read_precondition,
+    browser_write_precondition,
+)
 from api.core.errors import APIError
 from api.identity.authentication.credentials import (
     CSRF_HEADER,
@@ -48,12 +51,13 @@ async def list_tokens(
     request: Request,
     response: Response,
     module: FromDishka[IdentityModule],
+    hasher: FromDishka[TokenHasher],
     project_id: Annotated[UUID | None, Query(alias="projectId")] = None,
 ) -> list[dict[str, object]]:
-    query = ListPersonalTokensQuery(
-        request.state.identity_principal.user_id, project_id
+    query = ListPersonalTokensQuery(request.state.identity_principal.user_id, project_id)
+    items = await module.query_with_precondition(
+        query, browser_read_precondition(request, request.state.identity_principal.user_id, hasher)
     )
-    items = await module.query(query)
     response.headers["Cache-Control"] = "no-store"
     return [_view(item) for item in items]
 
@@ -72,16 +76,9 @@ async def create_token(
     command = CreatePersonalTokenCommand(
         actor.user_id, actor.project_id, body.name, tuple(body.scopes), body.hours
     )
-    result = await execute_browser_write(
-        module,
+    result = await module.execute_with_precondition(
         command,
-        browser_write_precondition(
-            request,
-            actor.user_id,
-            hasher,
-            expected_project_id=actor.project_id,
-            check_project=True,
-        ),
+        browser_write_precondition(request, actor.user_id, hasher),
     )
     item, secret = result
     response.headers["Cache-Control"] = "no-store"
@@ -100,10 +97,9 @@ async def rotate_token(
 ) -> dict[str, object]:
     actor_id = request.state.identity_principal.user_id
     command = RotatePersonalTokenCommand(actor_id, token_id)
-    result = await execute_browser_write(
-        module,
+    result = await module.execute_with_precondition(
         command,
-        browser_write_precondition(request, actor_id, hasher, token_id=token_id),
+        browser_write_precondition(request, actor_id, hasher),
     )
     if result is None:
         raise APIError(404, "not_found", "Token not found")
@@ -124,10 +120,9 @@ async def revoke_token(
 ) -> Response:
     actor_id = request.state.identity_principal.user_id
     command = RevokePersonalTokenCommand(actor_id, token_id)
-    revoked = await execute_browser_write(
-        module,
+    revoked = await module.execute_with_precondition(
         command,
-        browser_write_precondition(request, actor_id, hasher, token_id=token_id),
+        browser_write_precondition(request, actor_id, hasher),
     )
     if not revoked:
         raise APIError(404, "not_found", "Token not found")

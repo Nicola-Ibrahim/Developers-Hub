@@ -1,5 +1,4 @@
 import asyncio
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -44,17 +43,9 @@ def test_profile_read_and_write_are_scoped_to_authenticated_user():
 
     users = Users()
     handler = UpdateProfileHandler(users)
-    profile = asyncio.run(
-        ReadProfileHandler(users, Sessions(), SimpleNamespace(digest=str)).execute(
-            ProfileQuery("session")
-        )
-    )
-    updated = asyncio.run(
-        handler.execute(UpdateProfileCommand(user_id, "Alice"))
-    )
-    cleared = asyncio.run(
-        handler.execute(UpdateProfileCommand(user_id, None))
-    )
+    profile = asyncio.run(ReadProfileHandler(users).execute(ProfileQuery(user_id)))
+    updated = asyncio.run(handler.execute(UpdateProfileCommand(user_id, "Alice")))
+    cleared = asyncio.run(handler.execute(UpdateProfileCommand(user_id, None)))
 
     assert profile.user_id == updated.user_id == user_id
     assert updated.user_name == "immutable-name"
@@ -87,8 +78,8 @@ def test_security_history_query_uses_only_authenticated_subject_and_is_bounded()
             return ()
 
     users = Users()
-    handler = SecurityHistoryHandler(users, Sessions(), SimpleNamespace(digest=str))
-    asyncio.run(handler.execute(SecurityHistoryQuery("session")))
+    handler = SecurityHistoryHandler(users)
+    asyncio.run(handler.execute(SecurityHistoryQuery(user_id)))
     assert users.requested == (user_id, 100)
 
 

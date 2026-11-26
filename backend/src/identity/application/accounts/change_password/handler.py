@@ -52,7 +52,9 @@ class ChangePasswordHandler:
     async def execute(
         self, command: ChangePasswordCommand, precondition: ActionPrecondition
     ) -> None:
-        async def load_account(users: UserRepository, _sessions: SessionRepository):
+        async def load_account(
+            users: UserRepository, _sessions: SessionRepository
+        ) -> AccountCredentials | None:
             return await users.find_login_account(command.actor_name)
 
         account = await self.transaction.run(load_account)

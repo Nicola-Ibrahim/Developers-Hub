@@ -16,6 +16,8 @@ from devops_platform.application.interfaces.resources import ResourceRepository
 from devops_platform.application.resource_management.get_resource.query import ReadResource
 from devops_platform.application.resource_management.read_models import ResourceDetails
 from devops_platform.application.shared.dto import AccessContext
+from shared.authorization.interfaces import AuthorizationDecisionPort
+from shared.authorization.models import AuthorizationDecision
 from shared.infra.settings import Settings
 
 
@@ -37,6 +39,23 @@ class _Session:
 
     async def close(self) -> None:
         self.closes += 1
+
+    async def scalar(self, _statement):
+        return None
+
+
+class _Authorizer:
+    async def evaluate(self, _request):
+        return AuthorizationDecision(True)
+
+
+class _AuthorizerOverride(Provider):
+    authorizer = provide(
+        _Authorizer,
+        provides=AuthorizationDecisionPort,
+        scope=Scope.APP,
+        override=True,
+    )
 
 
 class _ResourceReads:
@@ -117,6 +136,7 @@ def _host(
         overrides=(
             _SessionFactoryOverride(sessions),
             _ActionOverrides(reads, component="platform_action"),
+            _AuthorizerOverride(),
         ),
     ).combined()
     request = Request({"type": "http", "method": "GET", "path": "/"})
@@ -125,6 +145,7 @@ def _host(
         container,
         request,
         settings,
+        _Authorizer(),
     )
     return host, container
 

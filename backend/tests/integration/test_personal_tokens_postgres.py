@@ -9,7 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for, mutation_request
 
-from api.composition.identity_preconditions import browser_write_precondition
+from api.composition.identity_preconditions import (
+    browser_read_precondition,
+    browser_write_precondition,
+)
 from api.core.errors import APIError
 from composition.container import BackendContainer
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
@@ -19,6 +22,7 @@ from identity.application.api_tokens.personal_token_messages import (
     RotatePersonalTokenCommand,
 )
 from identity.application.interfaces.dispatch import IdentityModule
+from identity.domain.session_errors import SessionAuthenticationRejected
 from identity.infra.persistence.models.api_token import ApiAccessTokenRow
 from identity.infra.persistence.models.session import SessionRow
 from identity.infra.persistence.models.user import InternalUserRow
@@ -39,6 +43,7 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
     seeded_at = datetime.now(UTC)
     first_session, first_csrf = "first-session", "first-csrf"
     second_session, second_csrf = "second-session", "second-csrf"
+    outsider_session, outsider_csrf = "outsider-session", "outsider-csrf"
     hasher = PepperedTokenHasher(PEPPER)
     with Session(postgres_engine) as session, session.begin():
         session.add_all(
@@ -60,6 +65,7 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
         for owner_id, project_id, raw_token, raw_csrf in (
             (user_id, project_a, first_session, first_csrf),
             (user_id, project_b, second_session, second_csrf),
+            (other_user, project_a, outsider_session, outsider_csrf),
         ):
             session.add(
                 SessionRow(
@@ -84,14 +90,11 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
         browser_allowed_origins=(ORIGIN,),
     )
 
-    def first_guard(*, token_id=None, check_project=False):
+    def first_guard():
         return browser_write_precondition(
             mutation_request(first_session, first_csrf, ORIGIN),
             user_id,
             hasher,
-            token_id=token_id,
-            expected_project_id=project_a,
-            check_project=check_project,
         )
 
     def second_guard():
@@ -99,14 +102,12 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
             mutation_request(second_session, second_csrf, ORIGIN),
             user_id,
             hasher,
-            expected_project_id=project_b,
-            check_project=True,
         )
 
     async def use_module(identity: IdentityModule):
         created_a, _ = await identity.execute_with_precondition(
             CreatePersonalTokenCommand(user_id, project_a, "a", ("catalog:read",), 1),
-            first_guard(check_project=True),
+            first_guard(),
         )
         created_b, _ = await identity.execute_with_precondition(
             CreatePersonalTokenCommand(user_id, project_b, "b", ("resources:read",), 8),
@@ -114,17 +115,35 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
         )
         assert [
             item.token_id
-            for item in await identity.query(ListPersonalTokensQuery(user_id, project_a))
+            for item in await identity.query_with_precondition(
+                ListPersonalTokensQuery(user_id, project_a),
+                browser_read_precondition(
+                    mutation_request(first_session, first_csrf, ORIGIN), user_id, hasher
+                ),
+            )
         ] == [created_a.token_id]
         assert [
             item.token_id
-            for item in await identity.query(ListPersonalTokensQuery(user_id, project_b))
+            for item in await identity.query_with_precondition(
+                ListPersonalTokensQuery(user_id, project_b),
+                browser_read_precondition(
+                    mutation_request(second_session, second_csrf, ORIGIN), user_id, hasher
+                ),
+            )
         ] == [created_b.token_id]
-        assert await identity.query(ListPersonalTokensQuery(other_user, project_a)) == ()
+        assert (
+            await identity.query_with_precondition(
+                ListPersonalTokensQuery(other_user, project_a),
+                browser_read_precondition(
+                    mutation_request(outsider_session, outsider_csrf, ORIGIN), other_user, hasher
+                ),
+            )
+            == ()
+        )
 
         rotated, secret = await identity.execute_with_precondition(
             RotatePersonalTokenCommand(user_id, created_a.token_id),
-            first_guard(token_id=created_a.token_id),
+            first_guard(),
         )
         assert secret
         assert rotated.token_id != created_a.token_id
@@ -152,19 +171,23 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
         with pytest.raises(APIError) as revoked:
             await identity.execute_with_precondition(
                 RotatePersonalTokenCommand(user_id, rotated.token_id),
-                first_guard(token_id=rotated.token_id),
+                first_guard(),
             )
         assert revoked.value.status == 401
-        with pytest.raises(APIError) as stale_project:
+        with pytest.raises(SessionAuthenticationRejected):
             await identity.execute_with_precondition(
                 CreatePersonalTokenCommand(user_id, project_b, "stale", ("resources:read",), 8),
                 second_guard(),
             )
-        assert stale_project.value.status == 401
         with Session(postgres_engine) as session:
             preserved = session.get(ApiAccessTokenRow, rotated.token_id)
             assert preserved is not None and preserved.revoked_at is None
-        assert await identity.query(ListPersonalTokensQuery(user_id, project_b)) == (created_b,)
+        assert await identity.query_with_precondition(
+            ListPersonalTokensQuery(user_id, project_b),
+            browser_read_precondition(
+                mutation_request(second_session, second_csrf, ORIGIN), user_id, hasher
+            ),
+        ) == (created_b,)
 
     async def exercise():
         container = BackendContainer(settings, engine=database).combined()

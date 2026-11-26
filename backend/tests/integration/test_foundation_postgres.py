@@ -105,8 +105,6 @@ async def issue_with_container(
                     mutation_request(session_token, csrf_token, config.browser_allowed_origins[0]),
                     actor_id,
                     PepperedTokenHasher(config.token_pepper.get_secret_value()),
-                    expected_project_id=project_id,
-                    check_project=True,
                 ),
             )
             return token.token_id, secret

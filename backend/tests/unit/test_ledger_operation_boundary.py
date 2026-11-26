@@ -23,6 +23,8 @@ from devops_platform.application.shared.errors import PlatformRequestError
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
 from identity.application.interfaces.dispatch import IdentityModule
 from identity.contracts import AuthenticatedPrincipal
+from shared.authorization.interfaces import AuthorizationDecisionPort
+from shared.authorization.models import AuthorizationDecision
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
 
@@ -79,7 +81,7 @@ def test_http_ledger_authentication_and_commit_precede_success(outcome, monkeypa
                 user, project, token_id, "developer", frozenset({"resources:write"})
             )
 
-    async def authenticate(active_session, token, settings, clock, project_access):
+    async def authenticate(active_session, token, settings, project_access):
         assert active_session is session
         assert session.events == ["begin"]
         assert token == "synthetic-raw-bearer-token-for-operation"
@@ -117,12 +119,25 @@ def test_http_ledger_authentication_and_commit_precede_success(outcome, monkeypa
         def request_handler(self) -> RequestTemporaryDatabaseHandler:
             return requester
 
+    class AuthorizationOverride(Provider):
+        @provide(scope=Scope.APP, override=True)
+        def authorization(self) -> AuthorizationDecisionPort:
+            class Allow:
+                async def evaluate(self, request):
+                    return AuthorizationDecision(True, "unit-test")
+
+            return Allow()
+
     config = Settings(
         database_url="postgresql+psycopg://localhost:1/devops_hub_test", token_pepper="p" * 40
     )
     container = BackendContainer(
         config,
-        overrides=(Override(), ActionOverride(component="platform_action")),
+        overrides=(
+            Override(),
+            ActionOverride(component="platform_action"),
+            AuthorizationOverride(),
+        ),
     ).combined()
     capture = CapturedResponses(create_app(container=container))
     try:

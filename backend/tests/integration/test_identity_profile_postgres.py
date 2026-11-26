@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 from test_browser_identity_postgres import ORIGIN, PASSWORD, PEPPER, seed_user
 from test_foundation_postgres import async_engine_for, mutation_request
 
-from api.composition.identity_preconditions import browser_write_precondition
+from api.composition.identity_preconditions import (
+    browser_read_precondition,
+    browser_write_precondition,
+)
 from api.core.errors import APIError
 from composition.container import BackendContainer
 from identity.application.authentication.login.command import LoginCommand
@@ -45,10 +48,28 @@ def test_profile_and_security_history_are_user_owned_and_csrf_failure_rolls_back
                 identity = await scope.get(IdentityModule)
                 hasher = await scope.get(TokenHasher)
                 first_login = await identity.execute(LoginCommand(first_user_name, PASSWORD, None))
-                await identity.execute(LoginCommand(second_user_name, PASSWORD, None))
+                second_login = await identity.execute(
+                    LoginCommand(second_user_name, PASSWORD, None)
+                )
 
-                first_profile = await identity.query(ProfileQuery(first_user_id))
-                second_profile = await identity.query(ProfileQuery(second_user_id))
+                first_profile = await identity.query_with_precondition(
+                    ProfileQuery(first_user_id),
+                    browser_read_precondition(
+                        mutation_request(first_login.session_token, first_login.csrf_token, ORIGIN),
+                        first_user_id,
+                        hasher,
+                    ),
+                )
+                second_profile = await identity.query_with_precondition(
+                    ProfileQuery(second_user_id),
+                    browser_read_precondition(
+                        mutation_request(
+                            second_login.session_token, second_login.csrf_token, ORIGIN
+                        ),
+                        second_user_id,
+                        hasher,
+                    ),
+                )
                 assert first_profile.user_id == first_user_id
                 assert first_profile.user_name == first_user_name
                 assert first_profile.display_name is None
@@ -65,11 +86,36 @@ def test_profile_and_security_history_are_user_owned_and_csrf_failure_rolls_back
                     ),
                 )
                 assert changed.display_name == "First User Display"
-                second_profile_after_change = await identity.query(ProfileQuery(second_user_id))
+                second_profile_after_change = await identity.query_with_precondition(
+                    ProfileQuery(second_user_id),
+                    browser_read_precondition(
+                        mutation_request(
+                            second_login.session_token, second_login.csrf_token, ORIGIN
+                        ),
+                        second_user_id,
+                        hasher,
+                    ),
+                )
                 assert second_profile_after_change.display_name is None
 
-                first_history = await identity.query(SecurityHistoryQuery(first_user_id))
-                second_history = await identity.query(SecurityHistoryQuery(second_user_id))
+                first_history = await identity.query_with_precondition(
+                    SecurityHistoryQuery(first_user_id),
+                    browser_read_precondition(
+                        mutation_request(first_login.session_token, first_login.csrf_token, ORIGIN),
+                        first_user_id,
+                        hasher,
+                    ),
+                )
+                second_history = await identity.query_with_precondition(
+                    SecurityHistoryQuery(second_user_id),
+                    browser_read_precondition(
+                        mutation_request(
+                            second_login.session_token, second_login.csrf_token, ORIGIN
+                        ),
+                        second_user_id,
+                        hasher,
+                    ),
+                )
                 assert any(
                     item.action == "profile_updated" and item.outcome == "succeeded"
                     for item in first_history
@@ -109,8 +155,23 @@ def test_profile_and_security_history_are_user_owned_and_csrf_failure_rolls_back
                 assert revoked.value.status == 401
                 assert revoked.value.code == "authentication_rejected"
 
-                persisted = await identity.query(ProfileQuery(first_user_id))
-                after_rejection = await identity.query(SecurityHistoryQuery(first_user_id))
+                fresh_login = await identity.execute(LoginCommand(first_user_name, PASSWORD, None))
+                persisted = await identity.query_with_precondition(
+                    ProfileQuery(first_user_id),
+                    browser_read_precondition(
+                        mutation_request(fresh_login.session_token, fresh_login.csrf_token, ORIGIN),
+                        first_user_id,
+                        hasher,
+                    ),
+                )
+                after_rejection = await identity.query_with_precondition(
+                    SecurityHistoryQuery(first_user_id),
+                    browser_read_precondition(
+                        mutation_request(fresh_login.session_token, fresh_login.csrf_token, ORIGIN),
+                        first_user_id,
+                        hasher,
+                    ),
+                )
                 assert persisted.display_name == "First User Display"
                 assert sum(item.action == "profile_updated" for item in after_rejection) == 1
         finally:

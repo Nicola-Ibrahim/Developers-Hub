@@ -131,7 +131,6 @@ from devops_platform.application.software_delivery.retry_delivery_step.command i
 from devops_platform.application.software_delivery.retry_delivery_step.handler import (
     RetryDeliveryStepHandler,
 )
-from devops_platform.authorization import authorize_platform_action
 from shared.dispatch import Command, HandlerRegistry, ModuleDispatcher, Query
 
 ResultT = TypeVar("ResultT")
@@ -175,9 +174,7 @@ class DeveloperPlatformModuleDispatcher(ModuleDispatcher):
         super().__init__(PLATFORM_HANDLER_REGISTRY, resolve_handler)
 
     async def execute(self, command: Command[ResultT]) -> ResultT:
-        authorize_platform_action(command)
         return await super().execute(command)
 
     async def query(self, query: Query[ResultT]) -> ResultT:
-        authorize_platform_action(query)
         return await super().query(query)

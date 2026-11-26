@@ -21,3 +21,4 @@ class AuthorizationRequest:
 class AuthorizationDecision:
     allowed: bool
     policy_revision: str | None = None
+    reason: str | None = None

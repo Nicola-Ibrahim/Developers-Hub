@@ -9,8 +9,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from api.identity.authentication.credentials import (
     BrowserCredentials,
     browser_credentials,
+    require_browser_mutation,
+    require_browser_origin,
+    require_cookie_session,
     require_valid_browser_session,
 )
+from api.settings.config import BrowserCookiePolicy
 from identity.application.interfaces.session_tokens import SessionTokenVerifier
 
 type RequestIdentity = str | BrowserCredentials | None
@@ -22,12 +26,31 @@ async def request_identity(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     session_tokens: FromDishka[SessionTokenVerifier],
+    cookie_policy: FromDishka[BrowserCookiePolicy],
 ) -> RequestIdentity:
     browser = browser_credentials(request)
     require_valid_browser_session(browser, session_tokens)
+    if browser.session_token is not None and browser.mutate:
+        require_browser_mutation(request, cookie_policy.allowed_origins)
     if browser.session_token is not None:
         identity: RequestIdentity = browser
     else:
         identity = credentials.credentials if credentials is not None else None
     request.state.request_identity = identity
     return identity
+
+
+@inject
+async def browser_request_identity(
+    request: Request,
+    session_tokens: FromDishka[SessionTokenVerifier],
+    cookie_policy: FromDishka[BrowserCookiePolicy],
+) -> BrowserCredentials:
+    """Cookie-only authentication for browser routes with no bearer security scheme."""
+    credentials = browser_credentials(request)
+    require_cookie_session(credentials)
+    require_valid_browser_session(credentials, session_tokens)
+    if credentials.mutate:
+        require_browser_origin(request, cookie_policy.allowed_origins)
+    request.state.request_identity = credentials
+    return credentials

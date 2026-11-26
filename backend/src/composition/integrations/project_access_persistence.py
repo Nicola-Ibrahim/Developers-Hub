@@ -16,7 +16,6 @@ from devops_platform.infra.persistence.repositories.project_access import (
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.domain.errors import IdentityValidationError
 from identity.domain.interfaces.project_access import IdentityProjectAccess
-from identity.domain.session_errors import SessionAuthenticationRejected
 from identity.infra.persistence.models.api_token import ApiAccessTokenRow
 from identity.infra.persistence.models.user import InternalUserRow
 from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
@@ -120,5 +119,4 @@ def project_access_repository_for_session(
         user_row=InternalUserRow,
         record_activity=activity.record_project_access_activity,
         validation_error=IdentityValidationError,
-        authorization_error=SessionAuthenticationRejected,
     )

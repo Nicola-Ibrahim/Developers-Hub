@@ -27,7 +27,6 @@ from devops_platform.domain.aggregates.resource_lifecycle import ResourceLifecyc
 from devops_platform.domain.entities.operation import AcceptedResourceRequest
 from devops_platform.domain.entities.resource import TemporaryResource
 from devops_platform.domain.errors import DomainError
-from devops_platform.domain.services.resource_access import ResourceAccessPolicy, ResourceActor
 from devops_platform.domain.services.resource_admission import (
     CapacitySnapshot,
     ResourceAdmissionPolicy,
@@ -53,17 +52,9 @@ from devops_platform.infra.persistence.models.resources import (
 )
 
 
-def _require_owner(access: AccessContext, resource: Resource, scope: str) -> None:
+def _require_project(access: AccessContext, resource: Resource) -> None:
     if resource.project_id != access.project_id:
         raise resource_not_found()
-    try:
-        ResourceAccessPolicy.require(
-            _to_lifecycle(resource).resource,
-            ResourceActor(access.user_id, access.project_id, access.role, access.scopes),
-            scope,
-        )
-    except DomainError as error:
-        raise PlatformRequestError("forbidden", "This action is not permitted", 403) from error
 
 
 def _to_lifecycle(resource: Resource) -> ResourceLifecycle:
@@ -153,7 +144,7 @@ class SQLAlchemyResourceRepository(ResourceRepository):
         )
         if resource is None:
             raise resource_not_found()
-        _require_owner(access, resource, "resources:write")
+        _require_project(access, resource)
         if resource.revision != revision:
             raise PlatformRequestError(
                 "revision_conflict", "Resource changed; refresh before retrying", 409
@@ -208,7 +199,7 @@ class SQLAlchemyResourceRepository(ResourceRepository):
         )
         if resource is None:
             raise resource_not_found()
-        _require_owner(access, resource, "resources:write")
+        _require_project(access, resource)
         now = await self._session.scalar(select(func.clock_timestamp()))
         assert isinstance(now, datetime)
         lifecycle = _to_lifecycle(resource).request_deletion()
@@ -271,7 +262,7 @@ class SQLAlchemyResourceRepository(ResourceRepository):
         )
         if resource is None:
             raise resource_not_found()
-        _require_owner(access, resource, "connections:read")
+        _require_project(access, resource)
         now = await self._session.scalar(select(func.clock_timestamp()))
         assert isinstance(now, datetime)
         try:

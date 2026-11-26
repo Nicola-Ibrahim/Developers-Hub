@@ -30,8 +30,6 @@ async def authenticate_platform_access(
             require_cookie_session(identity),
             identity.project_id,
             identity.csrf_token,
-            identity.origin,
-            settings.browser_allowed_origins,
             identity.mutate,
             settings.token_pepper.get_secret_value(),
             project_access=project_access,

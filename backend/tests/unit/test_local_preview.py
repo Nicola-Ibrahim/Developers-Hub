@@ -27,7 +27,6 @@ from devops_platform.application.software_delivery.deploy_application.command im
 from devops_platform.application.software_delivery.deploy_application.handler import (
     DeployApplicationHandler,
 )
-from devops_platform.authorization import authorize_platform_access, authorize_platform_action
 from devops_platform.domain.errors import DomainError
 from devops_platform.domain.value_objects.access_context import AccessContext
 from devops_platform.domain.value_objects.image_digest import ImageDigest
@@ -69,30 +68,6 @@ def test_local_preview_request_has_only_registration_fields() -> None:
             ttl_seconds=60,
             image_digest="sha256:" + "a" * 64,
         )
-
-
-def test_local_preview_authorization_requires_write_scope_and_scoped_project() -> None:
-    project_id, actor_id = uuid4(), uuid4()
-    request = LocalPreviewRegistration("feature-preview", uuid4(), 600)
-    authorized = AccessContext(actor_id, project_id, "developer", frozenset({"resources:write"}))
-    authorize_platform_action(
-        CreateLocalPreview(authorized, request, "preview-key", datetime.now(UTC))
-    )
-
-    missing_scope = AccessContext(actor_id, project_id, "developer", frozenset())
-    with pytest.raises(PlatformRequestError) as forbidden:
-        authorize_platform_action(
-            CreateLocalPreview(missing_scope, request, "preview-key", datetime.now(UTC))
-        )
-    assert (forbidden.value.code, forbidden.value.status) == ("forbidden", 403)
-
-    with pytest.raises(PlatformRequestError) as cross_project:
-        authorize_platform_access(
-            CreateLocalPreview,
-            authorized,
-            project_id=uuid4(),
-        )
-    assert (cross_project.value.code, cross_project.value.status) == ("not_found", 404)
 
 
 def test_local_preview_handler_validates_name_ttl_and_persists_replay_identity() -> None:

@@ -6,7 +6,10 @@ from uuid import UUID
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Header, Request, Response
 
-from api.composition.identity_preconditions import browser_write_precondition, execute_browser_write
+from api.composition.identity_preconditions import (
+    browser_read_precondition,
+    browser_write_precondition,
+)
 from api.identity.authentication.credentials import (
     CSRF_HEADER,
     SESSION_COOKIE,
@@ -29,10 +32,15 @@ router = APIRouter()
 @router.get("/me/browser", tags=["identity"])
 @inject
 async def browser_me(
-    request: Request, response: Response, module: FromDishka[IdentityModule]
+    request: Request,
+    response: Response,
+    module: FromDishka[IdentityModule],
+    hasher: FromDishka[TokenHasher],
 ) -> dict[str, object]:
-    principal = await module.execute(
-        RotateCsrfCommand(require_cookie_session(browser_credentials(request)))
+    command = RotateCsrfCommand(require_cookie_session(browser_credentials(request)))
+    principal = await module.execute_with_precondition(
+        command,
+        browser_read_precondition(request, request.state.identity_principal.user_id, hasher),
     )
     response.headers["Cache-Control"] = "no-store"
     return {"csrfToken": principal.csrf_token, "principal": _principal(principal)}
@@ -44,10 +52,13 @@ async def sessions(
     request: Request,
     response: Response,
     module: FromDishka[IdentityModule],
+    hasher: FromDishka[TokenHasher],
 ) -> list[dict[str, object]]:
     response.headers["Cache-Control"] = "no-store"
-    values = await module.query(
-        ListSessionsQuery(require_cookie_session(browser_credentials(request)))
+    actor = request.state.identity_principal
+    query = ListSessionsQuery(actor.user_id, actor.session_id)
+    values = await module.query_with_precondition(
+        query, browser_read_precondition(request, actor.user_id, hasher)
     )
     return [
         {
@@ -67,17 +78,18 @@ async def sessions(
 async def revoke_session(
     session_id: UUID,
     request: Request,
-    csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
+    _csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
     response: Response,
     module: FromDishka[IdentityModule],
+    hasher: FromDishka[TokenHasher],
 ) -> Response:
-    await module.execute(
-        RevokeSessionCommand(
-            require_cookie_session(browser_credentials(request)),
-            session_id,
-            csrf_token,
-            request.headers.get("origin"),
-        )
+    command = RevokeSessionCommand(
+        request.state.identity_principal.user_id,
+        session_id,
+    )
+    await module.execute_with_precondition(
+        command,
+        browser_write_precondition(request, request.state.identity_principal.user_id, hasher),
     )
     response.status_code = 204
     return response
@@ -98,10 +110,8 @@ async def change_password(
     command = ChangePasswordCommand(
         actor.user_id, actor.user_name, body.current_password, body.new_password
     )
-    await execute_browser_write(
-        module,
-        command,
-        browser_write_precondition(request, actor.user_id, hasher),
+    await module.execute_with_precondition(
+        command, browser_write_precondition(request, actor.user_id, hasher)
     )
     response.delete_cookie(
         SESSION_COOKIE,

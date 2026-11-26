@@ -8,6 +8,7 @@ from api.health.metrics_adapter import DatabaseOperationalMetrics
 from api.platform.module import PlatformRequestModule
 from api.settings.config import BrowserCookiePolicy
 from devops_platform.application.interfaces.module import DeveloperPlatformModule
+from shared.authorization.interfaces import AuthorizationDecisionPort
 from shared.infra.settings import Settings
 
 
@@ -25,6 +26,10 @@ class ApiCompositionProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def platform_module(
-        self, container: AsyncContainer, request: Request, settings: Settings
+        self,
+        container: AsyncContainer,
+        request: Request,
+        settings: Settings,
+        authorizer: AuthorizationDecisionPort,
     ) -> DeveloperPlatformModule:
-        return PlatformRequestModule(container, request, settings)
+        return PlatformRequestModule(container, request, settings, authorizer)

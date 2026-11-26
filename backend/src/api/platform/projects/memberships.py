@@ -6,8 +6,9 @@ from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Header, Request, Response
+from fastapi import APIRouter, Depends, Header, Request, Response
 
+from api.core.security.request_identity import browser_request_identity
 from api.identity.authentication.credentials import CSRF_HEADER, browser_credentials
 from api.platform.projects.schemas import MembershipBody
 from devops_platform.application.interfaces.module import DeveloperPlatformModule
@@ -18,7 +19,7 @@ from devops_platform.application.project_access.manage_project_membership.comman
 from devops_platform.application.shared.dto import AccessContext
 from identity.domain.records import SessionPrincipal
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(browser_request_identity)])
 
 
 async def project_access(project_id: UUID, request: Request) -> AccessContext:

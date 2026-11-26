@@ -5,10 +5,12 @@ from uuid import uuid4
 import pytest
 from starlette.requests import Request
 
+from api.composition.identity_preconditions import browser_write_precondition
 from api.core.errors import APIError
 from api.identity.authentication.credentials import (
     BrowserCredentials,
     browser_credentials,
+    require_browser_origin,
     require_valid_browser_session,
 )
 from identity.application.accounts.change_password.handler import (
@@ -20,7 +22,6 @@ from identity.application.authentication.login.handler import (
     LoginHandler,
 )
 from identity.application.shared.principal import principal_for_project
-from identity.application.shared.session_security import authorize_session_mutation
 from identity.domain.errors import IdentityValidationError
 from identity.domain.password_policy import validate_password
 from identity.domain.records import AccountCredentials, MembershipDetails
@@ -33,36 +34,47 @@ from identity.infra.security.passwords import Argon2idPasswordHasher
 
 
 def test_browser_mutation_checks_origin_before_locking_and_rejects_invalid_csrf():
-    now = datetime.now(UTC)
     calls = []
+    user_id = uuid4()
+    hasher = PepperedTokenHasher("test-session-pepper" * 2)
+    principal = principal_for_project(
+        user_id=user_id,
+        user_name="alice",
+        session_id=uuid4(),
+        memberships=(),
+        project_id=None,
+        csrf_token="",
+    )
 
     class Repository:
         async def authorize_session_operation(self, token, project, at, *, lock_for_mutation):
-            calls.append((token, project, at, lock_for_mutation))
-            return object()
+            calls.append((token, project, lock_for_mutation))
+            return principal
 
         async def validate_csrf(self, token, csrf):
             calls.append((token, csrf))
             return False
 
     async def authorize(origin):
-        return await authorize_session_mutation(
-            Repository(),
-            lambda secret: f"digest:{secret}",
-            ("https://hub.test",),
-            "session",
-            "csrf",
-            origin,
-            now=now,
+        mutation = request(
+            headers=(("Origin", origin), ("X-CSRF-Token", "csrf")),
+            cookies=b"devops_session=session",
         )
+        require_browser_origin(mutation, ("https://hub.test",))
+        return await browser_write_precondition(mutation, user_id, hasher)(Repository(), None)
 
-    with pytest.raises(SessionAuthenticationRejected):
+    with pytest.raises(APIError) as origin_denied:
         asyncio.run(authorize("https://other.test"))
+    assert origin_denied.value.status == 401
     assert calls == []
 
-    with pytest.raises(SessionAuthenticationRejected):
+    with pytest.raises(APIError) as csrf_denied:
         asyncio.run(authorize("https://hub.test/"))
-    assert calls == [("digest:session", None, now, True), ("digest:session", "digest:csrf")]
+    assert csrf_denied.value.status == 401
+    assert calls == [
+        (hasher.digest("session"), None, True),
+        (hasher.digest("session"), hasher.digest("csrf")),
+    ]
 
 
 def request(headers=(), cookies=b""):
@@ -205,13 +217,12 @@ def test_login_handler_commits_rejected_credentials_before_returning_rejection()
         Argon2idPasswordHasher(),
         Tokens(),
         PepperedTokenHasher("synthetic-pepper-for-login-tests" * 2),
-        ("https://hub.test",),
         SessionTokenIssuer(),
     )
 
     async def execute():
         with pytest.raises(SessionAuthenticationRejected):
-            await handler.execute(LoginCommand(" Alice ", "wrong", None, "https://hub.test"))
+            await handler.execute(LoginCommand(" Alice ", "wrong", None))
 
     asyncio.run(execute())
     assert events == [
@@ -226,9 +237,7 @@ def test_login_handler_commits_rejected_credentials_before_returning_rejection()
 
 def test_password_change_checks_current_password_and_preserves_version_fence():
     hasher = Argon2idPasswordHasher()
-    account = AccountCredentials(
-        uuid4(), "alice", hasher.hash("current-password-value"), 7, True, ()
-    )
+    account = AccountCredentials(uuid4(), "alice", hasher.hash("current-password-value"), 7, True)
 
     async def check() -> None:
         prepared = await verify_password_change(

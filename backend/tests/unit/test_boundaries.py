@@ -92,6 +92,8 @@ def violation(module, target):
     target_context = context_name(target)
     if other in RETIRED_ROOTS:
         return True
+    if target == "shared.authorization" or target.startswith("shared.authorization."):
+        return module_context is not None and module_parts[1:2] in (["application"], ["domain"])
     if module_context:
         layer_parts = module_parts[1:2]
         if module.startswith(module_context + ".infra.workers.") and other == "composition":
