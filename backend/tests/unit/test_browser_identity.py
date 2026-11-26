@@ -28,7 +28,7 @@ from identity.domain.records import AccountCredentials, MembershipDetails
 from identity.domain.session_errors import SessionAuthenticationRejected
 from identity.domain.value_objects.session_expiry import SessionExpiry
 from identity.domain.value_objects.user_name import UserName
-from identity.infra.composition.module import IdentityModule
+from identity.infra.module import IdentityModule
 from identity.infra.security.jwt import JwtSessionTokens
 from identity.infra.security.opaque_secrets import PepperedTokenHasher
 from identity.infra.security.passwords import Argon2idPasswordHasher

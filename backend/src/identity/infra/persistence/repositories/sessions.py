@@ -16,6 +16,7 @@ from identity.domain.records import MembershipDetails, SessionPrincipal
 from identity.domain.value_objects.session_expiry import SessionExpiry
 from identity.infra.persistence.models.activity import IdentityActivityRow
 from identity.infra.persistence.models.session import SessionRow
+from identity.infra.persistence.repositories.users import SQLAlchemyUserRepository
 
 _IDLE_WINDOW = timedelta(minutes=30)
 
@@ -375,3 +376,10 @@ class SQLAlchemySessionRepository(SessionRepository):
         now: datetime,
     ) -> None:
         await self._record_activity(actor_id, subject_id, project_id, action, outcome, now)
+
+
+def identity_repositories_for_session(
+    session: AsyncSession, project_access: IdentityProjectAccess
+) -> tuple[SQLAlchemyUserRepository, SQLAlchemySessionRepository]:
+    users = SQLAlchemyUserRepository(session, project_access)
+    return users, SQLAlchemySessionRepository(session, users, project_access)

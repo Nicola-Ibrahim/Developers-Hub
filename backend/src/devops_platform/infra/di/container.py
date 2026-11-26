@@ -6,11 +6,11 @@ from devops_platform import application
 from devops_platform.application.project_access.bootstrap_first_admin.command import (
     BootstrapFirstAdmin,
 )
-from devops_platform.infra.composition.module import PLATFORM_HANDLER_REGISTRY
-from devops_platform.infra.composition.providers_action import PlatformActionProvider
-from devops_platform.infra.composition.providers_delivery import ApplicationDeliveryProvider
-from devops_platform.infra.composition.providers_platform import PlatformProvider
-from devops_platform.infra.composition.providers_worker import ApplicationWorkerProvider
+from devops_platform.infra.di.providers_action import PlatformActionProvider
+from devops_platform.infra.di.providers_delivery import ApplicationDeliveryProvider
+from devops_platform.infra.di.providers_platform import PlatformProvider
+from devops_platform.infra.di.providers_worker import ApplicationWorkerProvider
+from devops_platform.infra.handlers import PLATFORM_HANDLER_REGISTRY
 from shared.infra.dispatch import validate_context_messages
 
 

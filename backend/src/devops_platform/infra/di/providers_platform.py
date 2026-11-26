@@ -2,6 +2,7 @@
 
 from dishka import Provider, Scope, provide
 
+from devops_platform.application.interfaces.module import DeveloperPlatformModule as PlatformModule
 from devops_platform.application.interfaces.projects import ProjectRegistrationRepository
 from devops_platform.application.interfaces.resources import (
     ResourceCredentialCipher,
@@ -13,6 +14,7 @@ from devops_platform.application.project_access.bootstrap_first_admin.handler im
 from devops_platform.application.projects.handler import RegisterProjectHandler
 from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
 from devops_platform.domain.interfaces.project_access_directory import ProjectAccessDirectory
+from devops_platform.infra.module import DeveloperPlatformModule
 from devops_platform.infra.persistence.repositories.project_access_directory import (
     SQLAlchemyProjectAccessDirectory,
 )
@@ -20,11 +22,18 @@ from devops_platform.infra.persistence.repositories.project_registration import 
     SQLAlchemyProjectRegistrationRepository,
 )
 from devops_platform.infra.persistence.repositories.resource import SQLAlchemyResourceRepository
+from devops_platform.infra.project_registration import (
+    ProjectUnitOfWork,
+    RegisterProjectCommandHandler,
+)
 from devops_platform.infra.security.credentials import FernetResourceCredentialCipher
+from shared.application.interfaces.unit_of_work import UnitOfWork
 from shared.infra.settings import Settings
 
 
 class PlatformProvider(Provider):
+    platform = provide(DeveloperPlatformModule, provides=PlatformModule, scope=Scope.REQUEST)
+
     project_access_directory = provide(
         SQLAlchemyProjectAccessDirectory,
         provides=ProjectAccessDirectory,
@@ -43,7 +52,9 @@ class PlatformProvider(Provider):
         scope=Scope.REQUEST,
     )
 
+    project_unit = provide(ProjectUnitOfWork, provides=UnitOfWork, scope=Scope.REQUEST)
     register = provide(RegisterProjectHandler, scope=Scope.REQUEST)
+    register_project = provide(RegisterProjectCommandHandler, scope=Scope.REQUEST)
 
     @provide(scope=Scope.REQUEST)
     def credential_cipher(self, settings: Settings) -> ResourceCredentialCipher | None:

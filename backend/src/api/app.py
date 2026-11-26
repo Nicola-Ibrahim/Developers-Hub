@@ -19,7 +19,7 @@ from api.core.middlewares.request_boundary import request_boundary
 from api.core.schemas import ErrorResponse
 from api.router import router as api_router
 from api.settings.config import APISettings, get_api_settings
-from composition.runtime import BackendRuntime
+from backend import BackendRuntime
 from devops_platform.application.shared.errors import CatalogForbidden, PlatformRequestError
 from devops_platform.domain import DomainError
 from identity.application.shared.errors import IdentityUnavailable

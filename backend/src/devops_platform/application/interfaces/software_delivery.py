@@ -1,8 +1,8 @@
 """Application contracts grouped by capability."""
 
 import re
+from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Protocol
 from uuid import UUID
 
 from devops_platform.application.shared.dto import AccessContext
@@ -39,7 +39,8 @@ from devops_platform.application.software_delivery.shared.models import (
 """Persistence required to attach a resource request to an application."""
 
 
-class ApplicationResourceAttachmentRepository(Protocol):
+class ApplicationResourceAttachmentRepository(ABC):
+    @abstractmethod
     async def enqueue_resource_attachment(
         self,
         access: AccessContext,
@@ -51,7 +52,8 @@ class ApplicationResourceAttachmentRepository(Protocol):
     ) -> DeliveryStepDetails: ...
 
 
-class LocalPreviewRepository(Protocol):
+class LocalPreviewRepository(ABC):
+    @abstractmethod
     async def create_local_preview(
         self,
         access: AccessContext,
@@ -65,7 +67,8 @@ class LocalPreviewRepository(Protocol):
 """Persistence required to queue an application deployment."""
 
 
-class ApplicationDeploymentRepository(Protocol):
+class ApplicationDeploymentRepository(ABC):
+    @abstractmethod
     async def enqueue_deployment(
         self,
         access: AccessContext,
@@ -80,14 +83,18 @@ class ApplicationDeploymentRepository(Protocol):
 """Durable queue operations for delivery workers."""
 
 
-class DeliveryWorkQueue(Protocol):
+class DeliveryWorkQueue(ABC):
+    @abstractmethod
     async def claim_step(self, now: datetime, lease_seconds: int) -> DeliveryClaim | None: ...
+    @abstractmethod
     async def heartbeat_step(
         self, claim: DeliveryClaim, now: datetime, lease_seconds: int
     ) -> bool: ...
+    @abstractmethod
     async def complete_step(
         self, claim: DeliveryClaim, result: DeliveryResult, now: datetime
     ) -> bool: ...
+    @abstractmethod
     async def fail_step(
         self,
         claim: DeliveryClaim,
@@ -96,13 +103,15 @@ class DeliveryWorkQueue(Protocol):
         retry_after_seconds: int,
         retryable: bool,
     ) -> bool: ...
+    @abstractmethod
     async def effect_is_current(self, claim: DeliveryClaim, now: datetime) -> bool: ...
 
 
 """Persistence required for preview-webhook idempotency and lifecycle."""
 
 
-class PreviewWebhookRepository(Protocol):
+class PreviewWebhookRepository(ABC):
+    @abstractmethod
     async def record_webhook(
         self,
         *,
@@ -114,7 +123,9 @@ class PreviewWebhookRepository(Protocol):
         action: str,
         now: datetime,
     ) -> bool: ...
+    @abstractmethod
     async def find_registered_repository(self, repository: str) -> RegisteredRepository | None: ...
+    @abstractmethod
     async def request_preview(
         self,
         *,
@@ -130,14 +141,17 @@ class PreviewWebhookRepository(Protocol):
         ttl_seconds: int,
         now: datetime,
     ) -> UUID | None: ...
+    @abstractmethod
     async def close_preview(self, *, repository: str, pull_request: int, now: datetime) -> int: ...
+    @abstractmethod
     async def expire_previews(self, now: datetime, limit: int) -> int: ...
 
 
 """Persistence required to retry a delivery step."""
 
 
-class DeliveryRetryRepository(Protocol):
+class DeliveryRetryRepository(ABC):
+    @abstractmethod
     async def retry_step(
         self, access: AccessContext, workload_id: UUID, step_id: UUID, now: datetime
     ) -> DeliveryStepDetails: ...
@@ -146,27 +160,33 @@ class DeliveryRetryRepository(Protocol):
 """Application generation and delivery workflows, expressed as repository/provider ports."""
 
 
-class TemplateCatalog(Protocol):
+class TemplateCatalog(ABC):
+    @abstractmethod
     def list_templates(self) -> tuple[TemplateVersion, ...]: ...
 
+    @abstractmethod
     def get(self, template_id: str, version: str) -> TemplateVersion: ...
 
+    @abstractmethod
     def render(
         self, template_id: str, version: str, values: dict[str, str]
     ) -> tuple[GeneratedFile, ...]: ...
 
 
-class WebhookSignatureVerifier(Protocol):
+class WebhookSignatureVerifier(ABC):
     """Verifies a provider signature and parses its authenticated JSON payload."""
 
+    @abstractmethod
     def verify(self, raw_body: bytes, signature: str | None) -> tuple[dict[str, object], str]: ...
 
 
-class RequestFingerprint(Protocol):
+class RequestFingerprint(ABC):
+    @abstractmethod
     def for_value(self, value: object) -> str: ...
 
 
-class RepositoryProvisioner(Protocol):
+class RepositoryProvisioner(ABC):
+    @abstractmethod
     async def create_repository(
         self,
         *,
@@ -178,6 +198,7 @@ class RepositoryProvisioner(Protocol):
         idempotency_key: str,
     ) -> str: ...
 
+    @abstractmethod
     async def create_update_pull_request(
         self,
         *,
@@ -188,7 +209,8 @@ class RepositoryProvisioner(Protocol):
     ) -> str: ...
 
 
-class ResourceProvisioner(Protocol):
+class ResourceProvisioner(ABC):
+    @abstractmethod
     async def request(
         self,
         *,
@@ -199,14 +221,17 @@ class ResourceProvisioner(Protocol):
         idempotency_key: str,
     ) -> UUID: ...
 
+    @abstractmethod
     async def ready(self, project_id: UUID, resource_id: UUID) -> bool: ...
 
+    @abstractmethod
     async def delete(
         self, project_id: UUID, owner_id: UUID, resource_id: UUID, idempotency_key: str
     ) -> None: ...
 
 
-class ApplicationDeployer(Protocol):
+class ApplicationDeployer(ABC):
+    @abstractmethod
     async def deploy(
         self,
         *,
@@ -219,6 +244,7 @@ class ApplicationDeployer(Protocol):
         idempotency_key: str,
     ) -> tuple[str, str]: ...
 
+    @abstractmethod
     async def remove(
         self, project_id: UUID, application_id: UUID, idempotency_key: str
     ) -> None: ...
@@ -231,14 +257,16 @@ class WorkloadDeliveryFailure(Exception):
         self.retryable = retryable
 
 
-class ApprovedImageCatalog(Protocol):
+class ApprovedImageCatalog(ABC):
+    @abstractmethod
     def is_approved(self, digest: str, target_id: str) -> bool: ...
 
 
 ApplicationDeliveryFailure = WorkloadDeliveryFailure
 
 
-class ApplicationDatabaseBindingResolver(Protocol):
+class ApplicationDatabaseBindingResolver(ABC):
+    @abstractmethod
     async def resolve(
         self, project_id: UUID, application_id: UUID, resource_id: UUID
     ) -> ApplicationDatabaseBinding: ...

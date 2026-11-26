@@ -1,11 +1,13 @@
 """Application-facing contract for atomic asynchronous operations."""
 
+from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import Protocol, TypeVar
+from typing import TypeVar
 
 T = TypeVar("T")
 R = TypeVar("R")
 
 
-class UnitOfWork(Protocol):
+class UnitOfWork(ABC):
+    @abstractmethod
     async def run(self, action: Callable[[], Awaitable[T]], materialize: Callable[[T], R]) -> R: ...

@@ -6,6 +6,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from devops_platform.application.interfaces.projects import ProjectRegistrationRepository
 from devops_platform.application.projects.command import RegisterProjectCommand
 from devops_platform.application.projects.result import (
     EnvironmentDetails,
@@ -24,7 +25,7 @@ from devops_platform.infra.persistence.models.resources import (
 )
 
 
-class SQLAlchemyProjectRegistrationRepository:
+class SQLAlchemyProjectRegistrationRepository(ProjectRegistrationRepository):
     """Request-scoped persistence adapter for one platform capability."""
 
     def __init__(self, session: AsyncSession) -> None:

@@ -1,15 +1,11 @@
-"""Authorize Platform operations using trusted request credentials and one SQL transaction."""
+"""Own Platform authorization, action transactions and handler dispatch."""
 
 from dataclasses import is_dataclass, replace
-from typing import Literal, TypeVar, cast
+from typing import TypeVar, cast
 
 from dishka import AsyncContainer, Scope
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from composition.integrations.platform_authentication import (
-    authenticate_browser_operation,
-    authenticate_platform_access,
-)
 from devops_platform.application.applications.create_application.command import (
     CreateApplication,
 )
@@ -20,7 +16,9 @@ from devops_platform.application.applications.list_applications.query import (
     ReadApplications,
 )
 from devops_platform.application.applications.read_templates.query import ReadTemplates
-from devops_platform.application.project_access.list_project_members.query import ListProjectMembers
+from devops_platform.application.interfaces.module import (
+    DeveloperPlatformModule as DeveloperPlatformModuleContract,
+)
 from devops_platform.application.project_access.manage_project_membership.command import (
     ManageProjectMembership,
 )
@@ -51,17 +49,15 @@ from devops_platform.application.software_delivery.retry_delivery_step.command i
     RetryDeliveryStep,
 )
 from devops_platform.application.software_delivery.shared.models import WebhookResult
-from devops_platform.authorization import ALL_SCOPES, authorization_facts
-from devops_platform.infra.composition.authorization import trusted_ownership_facts
-from devops_platform.infra.composition.module import PLATFORM_HANDLER_REGISTRY
-from identity.domain.interfaces.project_access import IdentityProjectAccess
-from shared.authorization.credentials import RequestCredentials, SessionCredentials
+from devops_platform.authorization import authorization_facts
+from devops_platform.infra.handlers import PLATFORM_HANDLER_REGISTRY
+from devops_platform.infra.persistence.authorization import trusted_ownership_facts
+from devops_platform.infra.persistence.resource_request_authority import project_roles_for_operation
 from shared.authorization.dispatch import require_authorized
 from shared.authorization.interfaces import AuthorizationDecisionPort
 from shared.authorization.models import AuthorizationRequest
 from shared.dispatch import Command, Mediator, Query, UnsupportedMessage
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork
-from shared.infra.settings import Settings
 
 ResultT = TypeVar("ResultT")
 
@@ -78,19 +74,15 @@ _DELIVERY_MESSAGES = (
 _ACTION_COMPONENT = "platform_action"
 
 
-class DeveloperPlatformModule:
-    """Module boundary that revalidates identity and authorizes in one transaction."""
+class DeveloperPlatformModule(DeveloperPlatformModuleContract):
+    """Authorize and dispatch Platform commands and queries."""
 
     def __init__(
         self,
         container: AsyncContainer,
-        credentials: RequestCredentials,
-        settings: Settings,
         authorizer: AuthorizationDecisionPort,
     ) -> None:
         self._container = container
-        self._credentials = credentials
-        self._settings = settings
         self._authorizer = authorizer
 
     async def execute(self, command: Command[ResultT]) -> ResultT:
@@ -135,66 +127,39 @@ class DeveloperPlatformModule:
             hasattr(message, "access") or isinstance(message, ReadProjects)
         ):
             raise TypeError("Platform message lacks access context")
-        token = self._credentials.identity
         async with self._container(scope=Scope.ACTION) as action_container:
             unit = await action_container.get(SqlAlchemyUnitOfWork, component=_ACTION_COMPONENT)
-            project_access = await action_container.get(
-                IdentityProjectAccess, component=_ACTION_COMPONENT
-            )
-
             mediator = self._mediator(action_container)
 
             async def authorized() -> ResultT:
-                if isinstance(message, ReadProjects) and isinstance(token, SessionCredentials):
-                    principal = await authenticate_browser_operation(
-                        unit.session,
-                        token,
-                        None,
-                        token_pepper=self._settings.token_pepper.get_secret_value(),
-                        project_access=project_access,
-                    )
-                    accesses = tuple(
-                        AccessContext(
-                            principal.user_id,
-                            member.project_id,
-                            cast(Literal["developer", "admin"], member.role),
-                            frozenset(ALL_SCOPES),
-                        )
-                        for member in principal.memberships
-                    )
-                    current = replace(message, accesses=accesses)
-                    if not accesses:
-                        facts = AuthorizationRequest(
-                            subject_id=principal.user_id,
-                            action="",
-                            resource_kind="projects",
-                        )
-                        await require_authorized(
-                            self._authorizer, current, facts, CatalogForbidden()
-                        )
-                    else:
-                        await self._authorize_projects(current)
-                    return cast(ResultT, await mediator.query(current))
+                if isinstance(message, ReadProjects):
+                    current_projects = await self._authorize_projects(message, unit.session)
+                    return cast(ResultT, await mediator.query(current_projects))
 
-                credentials = token
-                if isinstance(token, SessionCredentials) and isinstance(
-                    message, (ListProjectMembers, ManageProjectMembership)
-                ):
-                    credentials = replace(
-                        token,
-                        project_id=message.project_id,
-                        mutate=isinstance(message, ManageProjectMembership),
-                    )
-                access = await authenticate_platform_access(
-                    unit.session, credentials, self._settings, project_access
+                access = getattr(message, "access", None)
+                if not isinstance(access, AccessContext):
+                    raise TypeError("Platform message lacks authenticated access")
+                facts = authorization_facts(message, access)
+                if facts.project_id != access.project_id:
+                    raise resource_not_found()
+                roles = await project_roles_for_operation(
+                    unit.session,
+                    access.user_id,
+                    (access.project_id,),
+                    membership_target_id=message.user_id
+                    if isinstance(message, ManageProjectMembership)
+                    else None,
                 )
+                role = roles.get(access.project_id)
+                if role is None:
+                    raise CatalogForbidden()
+                current_access = replace(access, role=role)
                 current = cast(
-                    Command[ResultT] | Query[ResultT],
-                    replace(message, accesses=(access,))
-                    if isinstance(message, ReadProjects)
-                    else replace(message, access=access),
+                    Command[ResultT] | Query[ResultT], replace(message, access=current_access)
                 )
-                await self._authorize(current, unit.session, access)
+                await self._authorize(
+                    current, unit.session, current_access, replace(facts, role=role)
+                )
                 if isinstance(current, Command):
                     return await mediator.execute(current)
                 return await mediator.query(current)
@@ -204,30 +169,44 @@ class DeveloperPlatformModule:
             except DatabaseUnavailable as error:
                 raise self._unavailable(message) from error
 
-    async def _authorize_projects(self, message: ReadProjects) -> None:
-        unique = {access.project_id: access for access in message.accesses}
-        for access in unique.values():
+    async def _authorize_projects(
+        self, message: ReadProjects, session: AsyncSession
+    ) -> ReadProjects:
+        if any(access.user_id != message.user_id for access in message.accesses):
+            raise CatalogForbidden()
+        requested = {access.project_id: access for access in message.accesses}
+        roles = await project_roles_for_operation(session, message.user_id, tuple(requested))
+        accesses = tuple(
+            replace(access, role=roles[project_id])
+            for project_id, access in requested.items()
+            if project_id in roles
+        )
+        current = replace(message, accesses=accesses)
+        if not accesses:
             await require_authorized(
                 self._authorizer,
-                message,
-                authorization_facts(message, access, project_id=access.project_id),
+                current,
+                AuthorizationRequest(
+                    subject_id=message.user_id, action="", resource_kind="projects"
+                ),
                 CatalogForbidden(),
             )
+        for access in accesses:
+            await require_authorized(
+                self._authorizer,
+                current,
+                authorization_facts(current, access, project_id=access.project_id),
+                CatalogForbidden(),
+            )
+        return current
 
     async def _authorize(
         self,
         message: object,
         session: AsyncSession,
         access: AccessContext,
+        facts: AuthorizationRequest,
     ) -> None:
-        facts = authorization_facts(message, access)
-        if (
-            facts.project_id is not None
-            and facts.subject_project_id is not None
-            and facts.project_id != facts.subject_project_id
-        ):
-            raise resource_not_found()
-
         facts = await trusted_ownership_facts(session, message, access, facts)
 
         message_module = type(message).__module__

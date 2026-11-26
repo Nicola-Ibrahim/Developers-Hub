@@ -5,11 +5,11 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from shared.authorization.interfaces import AuthorizationUnavailable
+from shared.authorization.interfaces import AuthorizationDecisionPort, AuthorizationUnavailable
 from shared.authorization.models import AuthorizationDecision, AuthorizationRequest
 
 
-class OpaAuthorizationClient:
+class OpaAuthorizationClient(AuthorizationDecisionPort):
     def __init__(self, base_url: str, client: httpx.AsyncClient, timeout: float = 2.0) -> None:
         parsed = urlsplit(base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:

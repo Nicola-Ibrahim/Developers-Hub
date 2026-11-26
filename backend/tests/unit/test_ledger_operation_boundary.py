@@ -8,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from test_operation_lifecycle import CapturedResponses, FakeSession
 
 from api.app import create_app
-from composition.container import BackendContainer
+from backend import BackendContainer
 from devops_platform.application.resource_management.list_resources.handler import (
     ReadResourcesHandler,
 )
@@ -18,7 +18,6 @@ from devops_platform.application.resource_management.submit_database_request.han
 from devops_platform.application.resource_management.submit_database_request.result import (
     AcceptedDatabaseRequest,
 )
-from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import PlatformRequestError
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
 from identity.application.interfaces.dispatch import IdentityModule
@@ -63,7 +62,9 @@ def test_platform_di_binds_both_context_repositories_to_one_operation_session():
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("outcome", ["accepted", "commit_failure", "request_conflict"])
+@pytest.mark.parametrize(
+    "outcome", ["accepted", "commit_failure", "request_conflict", "membership_revoked"]
+)
 def test_http_ledger_authentication_and_commit_precede_success(outcome, monkeypatch):
     user, project, token_id, resource_id, operation_id = (uuid4() for _ in range(5))
     events = []
@@ -77,27 +78,28 @@ def test_http_ledger_authentication_and_commit_precede_success(outcome, monkeypa
     class Identity:
         async def query(self, query):
             assert query == AuthenticateApiTokenQuery("synthetic-raw-bearer-token-for-operation")
+            assert session.events == []
+            events.append("authenticate")
             return AuthenticatedPrincipal(
-                user, project, token_id, "developer", frozenset({"resources:write"})
+                user, project, token_id, "admin", frozenset({"resources:write"})
             )
 
-    async def authenticate(active_session, token, settings, project_access):
+    async def current_roles(active_session, actor_id, project_ids, *, membership_target_id):
         assert active_session is session
         assert session.events == ["begin"]
-        assert token == "synthetic-raw-bearer-token-for-operation"
-        events.append("authenticate")
-        return AccessContext(user, project, "developer", frozenset({"resources:write"}))
+        assert (actor_id, project_ids, membership_target_id) == (user, (project,), None)
+        events.append("membership")
+        return {} if outcome == "membership_revoked" else {project: "developer"}
 
-    monkeypatch.setattr(
-        "composition.integrations.platform_authorization.authenticate_platform_access", authenticate
-    )
+    monkeypatch.setattr("devops_platform.infra.module.project_roles_for_operation", current_roles)
 
     class Requester:
         async def execute(self, message):
             access, command, key = message.access, message.request, message.idempotency_key
-            assert events == ["authenticate"]
+            assert events == ["authenticate", "membership", "authorize"]
             assert access.project_id == command.project_id == project
             assert access.user_id == user
+            assert access.role == "developer"
             assert key == "test-request"
             captured.append(command)
             if outcome == "request_conflict":
@@ -126,6 +128,9 @@ def test_http_ledger_authentication_and_commit_precede_success(outcome, monkeypa
         def authorization(self) -> AuthorizationDecisionPort:
             class Allow:
                 async def evaluate(self, request):
+                    assert request.role == "developer"
+                    assert request.scopes == ("resources:write",)
+                    events.append("authorize")
                     return AuthorizationDecision(True, "unit-test")
 
             return Allow()
@@ -161,10 +166,19 @@ def test_http_ledger_authentication_and_commit_precede_success(outcome, monkeypa
                     "ttl_seconds": 3600,
                 },
             )
-        expected = {"accepted": 202, "commit_failure": 503, "request_conflict": 409}[outcome]
+        expected = {
+            "accepted": 202,
+            "commit_failure": 503,
+            "request_conflict": 409,
+            "membership_revoked": 403,
+        }[outcome]
         assert response.status_code == expected
         assert capture.statuses == [expected]
-        assert len(captured) == 1
+        if outcome == "membership_revoked":
+            assert events == ["authenticate", "membership"]
+            assert not captured
+        else:
+            assert len(captured) == 1
         assert "private database" not in response.text
         assert session.events[-1] == "close"
         if outcome == "accepted":

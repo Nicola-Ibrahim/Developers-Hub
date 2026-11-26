@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from identity.application.shared.errors import IdentityUnavailable
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.domain.errors import IdentityValidationError
+from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.interfaces.project_access import IdentityProjectAccess
 from identity.domain.records import (
     ApiTokenAuditEvent,
@@ -17,10 +18,11 @@ from identity.domain.records import (
     PersonalApiToken,
 )
 from identity.infra.persistence.models.api_token import ApiAccessTokenRow
+from identity.infra.persistence.models.user import InternalUserRow
 from shared.infra.persistence.audit import AuditEvent
 
 
-class SQLAlchemyApiTokenRepository:
+class SQLAlchemyApiTokenRepository(ApiTokenRepository):
     """Identity persistence bound to an operation-scoped session."""
 
     def __init__(self, session: AsyncSession, project_access: IdentityProjectAccess) -> None:
@@ -29,16 +31,37 @@ class SQLAlchemyApiTokenRepository:
 
     async def find_token_credential(self, digest: str) -> ApiTokenAuthenticationDetails | None:
         try:
-            # Acquire the token lock first. The subsequent joined FOR SHARE query also
-            # locks the user and membership rows; this aligns token auth with rotation.
+            # Token rotation also locks the token before the user and membership rows.
             token = await self._session.scalar(
                 select(ApiAccessTokenRow)
                 .where(ApiAccessTokenRow.digest == digest)
                 .with_for_update(read=True, of=ApiAccessTokenRow)
+                .execution_options(populate_existing=True)
             )
             if token is None:
                 return None
-            return await self._project_access.find_token_credential(digest)
+            user_active: bool | None = await self._session.scalar(
+                select(InternalUserRow.active)
+                .where(InternalUserRow.id == token.user_id)
+                .with_for_update(read=True, of=InternalUserRow)
+            )
+            if user_active is None:
+                return None
+            role = await self._project_access.lock_project_membership_role(
+                token.user_id, token.project_id, shared=True
+            )
+            if role is None:
+                return None
+            return ApiTokenAuthenticationDetails(
+                token_id=token.id,
+                user_id=token.user_id,
+                project_id=token.project_id,
+                role=role,
+                scopes=tuple(token.scopes),
+                user_active=user_active,
+                expires_at=token.expires_at,
+                revoked_at=token.revoked_at,
+            )
         except SQLAlchemyError as exc:
             raise IdentityUnavailable() from exc
 
@@ -70,7 +93,9 @@ class SQLAlchemyApiTokenRepository:
         expires_at: datetime,
     ) -> UUID:
         try:
-            if not await self._project_access.lock_project_membership(user_id, project_id):
+            if not await self._project_access.lock_project_membership_role(
+                user_id, project_id, shared=False
+            ):
                 raise IdentityValidationError("Current project membership is required")
             row = ApiAccessTokenRow(
                 user_id=user_id,
@@ -107,7 +132,9 @@ class SQLAlchemyApiTokenRepository:
                 return None
             if not set(row.scopes) <= set(allowed_scopes):
                 return None
-            if not await self._project_access.lock_project_membership(user_id, row.project_id):
+            if not await self._project_access.lock_project_membership_role(
+                user_id, row.project_id, shared=False
+            ):
                 return None
             row.revoked_at = now
             replacement = ApiAccessTokenRow(

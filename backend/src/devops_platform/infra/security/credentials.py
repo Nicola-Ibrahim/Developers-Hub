@@ -9,10 +9,11 @@ from cryptography.fernet import Fernet, InvalidToken
 from devops_platform.application.interfaces.resources import (
     DatabaseCredentials,
     ProviderFailure,
+    ResourceCredentialCipher,
 )
 
 
-class FernetResourceCredentialCipher:
+class FernetResourceCredentialCipher(ResourceCredentialCipher):
     def __init__(self, key: str, key_id: str) -> None:
         self._cipher = Fernet(key.encode())
         self.key_id = key_id

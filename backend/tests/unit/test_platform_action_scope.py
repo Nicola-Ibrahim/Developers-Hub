@@ -9,13 +9,12 @@ from uuid import uuid4
 from dishka import AsyncContainer, Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from composition.container import BackendContainer
+from backend import BackendContainer
 from devops_platform.application.interfaces.module import DeveloperPlatformModule
 from devops_platform.application.interfaces.resources import ResourceRepository
 from devops_platform.application.resource_management.get_resource.query import ReadResource
 from devops_platform.application.resource_management.read_models import ResourceDetails
 from devops_platform.application.shared.dto import AccessContext
-from shared.authorization.credentials import RequestCredentials
 from shared.authorization.interfaces import AuthorizationDecisionPort
 from shared.authorization.models import AuthorizationDecision
 from shared.infra.settings import Settings
@@ -141,15 +140,15 @@ def _container(sessions: _SessionFactory, reads: _ResourceReadTracker) -> AsyncC
 
 def test_platform_dispatch_uses_same_session_for_unit_and_repository(monkeypatch) -> None:
     trusted = AccessContext(uuid4(), uuid4(), "developer", frozenset({"resources:read"}))
-    authenticated_sessions = []
+    membership_sessions = []
 
-    async def authenticate(session, *_args):
-        authenticated_sessions.append(session)
-        return trusted
+    async def project_roles(session, *_args, **_kwargs):
+        membership_sessions.append(session)
+        return {trusted.project_id: trusted.role}
 
     monkeypatch.setattr(
-        "composition.integrations.platform_authorization.authenticate_platform_access",
-        authenticate,
+        "devops_platform.infra.module.project_roles_for_operation",
+        project_roles,
     )
     sessions = _SessionFactory()
     reads = _ResourceReadTracker()
@@ -158,8 +157,6 @@ def test_platform_dispatch_uses_same_session_for_unit_and_repository(monkeypatch
     async def exercise() -> ResourceDetails:
         try:
             async with container() as request_container:
-                credentials = await request_container.get(RequestCredentials)
-                credentials.identity = "test-token"
                 host = await request_container.get(DeveloperPlatformModule)
                 return await host.query(ReadResource(trusted, uuid4()))
         finally:
@@ -168,7 +165,7 @@ def test_platform_dispatch_uses_same_session_for_unit_and_repository(monkeypatch
     result = asyncio.run(exercise())
     assert result.project_id == trusted.project_id
     assert len(sessions.sessions) == 1
-    assert authenticated_sessions == reads.sessions_used == [sessions.sessions[0]]
+    assert membership_sessions == reads.sessions_used == [sessions.sessions[0]]
     assert len(reads.repositories) == 1
     assert reads.repositories[0].session is sessions.sessions[0]
     session = sessions.sessions[0]
@@ -178,15 +175,15 @@ def test_platform_dispatch_uses_same_session_for_unit_and_repository(monkeypatch
 
 def test_platform_dispatch_creates_a_fresh_action_unit_for_each_call(monkeypatch) -> None:
     trusted = AccessContext(uuid4(), uuid4(), "developer", frozenset({"resources:read"}))
-    authenticated_sessions = []
+    membership_sessions = []
 
-    async def authenticate(session, *_args):
-        authenticated_sessions.append(session)
-        return trusted
+    async def project_roles(session, *_args, **_kwargs):
+        membership_sessions.append(session)
+        return {trusted.project_id: trusted.role}
 
     monkeypatch.setattr(
-        "composition.integrations.platform_authorization.authenticate_platform_access",
-        authenticate,
+        "devops_platform.infra.module.project_roles_for_operation",
+        project_roles,
     )
     sessions = _SessionFactory()
     reads = _ResourceReadTracker()
@@ -195,8 +192,6 @@ def test_platform_dispatch_creates_a_fresh_action_unit_for_each_call(monkeypatch
     async def exercise() -> tuple[ResourceDetails, ResourceDetails]:
         try:
             async with container() as request_container:
-                credentials = await request_container.get(RequestCredentials)
-                credentials.identity = "test-token"
                 host = await request_container.get(DeveloperPlatformModule)
                 first = await host.query(ReadResource(trusted, uuid4()))
                 second = await host.query(ReadResource(trusted, uuid4()))
@@ -208,7 +203,7 @@ def test_platform_dispatch_creates_a_fresh_action_unit_for_each_call(monkeypatch
     assert first.id != second.id
     assert len(sessions.sessions) == 2
     assert sessions.sessions[0] is not sessions.sessions[1]
-    assert authenticated_sessions == reads.sessions_used == sessions.sessions
+    assert membership_sessions == reads.sessions_used == sessions.sessions
     assert len(reads.repositories) == 2
     assert reads.repositories[0] is not reads.repositories[1]
     assert [repository.session for repository in reads.repositories] == sessions.sessions

@@ -1,4 +1,4 @@
-"""Bridge application delivery to the durable database ledger, without provider effects."""
+"""Record database requests for application delivery in the Platform resource ledger."""
 
 import hashlib
 import json
@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from devops_platform.application.interfaces.software_delivery import (
     ApplicationDeliveryFailure,
+    ResourceProvisioner,
 )
 from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
 from devops_platform.application.resource_management.submit_database_request.command import (
@@ -25,14 +26,14 @@ from devops_platform.application.software_delivery.attach_database.command impor
     ResourceAttachmentSpec,
 )
 from devops_platform.authorization import ALL_SCOPES, authorization_facts
-from devops_platform.infra.composition.resource_request_authority import resource_request_role
 from devops_platform.infra.persistence.models.resources import Resource
 from devops_platform.infra.persistence.repositories.resource import SQLAlchemyResourceRepository
+from devops_platform.infra.persistence.resource_request_authority import resource_request_role
 from shared.authorization.dispatch import require_authorized
 from shared.authorization.interfaces import AuthorizationDecisionPort
 
 
-class LedgerApplicationResources:
+class LedgerApplicationResources(ResourceProvisioner):
     def __init__(
         self,
         sessions: async_sessionmaker[AsyncSession],
@@ -67,14 +68,16 @@ class LedgerApplicationResources:
                 command.size_id,
                 command.ttl_seconds,
             )
-            message = RequestTemporaryDatabase(access, request, idempotency_key, datetime.now(UTC))
+            # Hash delivery keys to fit the resource ledger's bounded key contract.
+            key = "app:" + hashlib.sha256(idempotency_key.encode()).hexdigest()
+            message = RequestTemporaryDatabase(access, request, key, datetime.now(UTC))
             await require_authorized(
                 self.authorizer,
                 message,
                 authorization_facts(message, access, project_id=project_id),
                 ApplicationDeliveryFailure("resource_owner_not_authorized", retryable=False),
             )
-            usecase = RequestTemporaryDatabaseHandler(
+            handler = RequestTemporaryDatabaseHandler(
                 SQLAlchemyResourceRepository(session),
                 self.catalog,
                 lambda value: hashlib.sha256(
@@ -82,13 +85,7 @@ class LedgerApplicationResources:
                 ).hexdigest(),
                 self.installation_id,
             )
-            # Delivery keys include UUIDs/kinds; hash to the resource API's bounded key contract.
-            key = "app:" + hashlib.sha256(idempotency_key.encode()).hexdigest()
-            return (
-                await usecase.execute(
-                    RequestTemporaryDatabase(access, request, key, datetime.now(UTC))
-                )
-            ).resource_id
+            return (await handler.execute(message)).resource_id
 
     async def ready(self, project_id: UUID, resource_id: UUID) -> bool:
         async with self.sessions() as session:

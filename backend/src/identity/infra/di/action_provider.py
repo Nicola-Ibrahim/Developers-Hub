@@ -14,8 +14,8 @@ from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.interfaces.project_access import IdentityProjectAccess
 from identity.domain.interfaces.session_repository import SessionRepository
 from identity.domain.interfaces.user_repository import UserRepository
-from identity.infra.composition.module import IDENTITY_HANDLER_REGISTRY, IDENTITY_REQUEST_MESSAGES
-from identity.infra.composition.providers import IdentityTokenScopePolicy
+from identity.infra.di.providers import IdentityTokenScopePolicy
+from identity.infra.module import IDENTITY_HANDLER_REGISTRY, IDENTITY_REQUEST_MESSAGES
 from identity.infra.persistence.repositories.sessions import SQLAlchemySessionRepository
 from identity.infra.persistence.repositories.users import SQLAlchemyUserRepository
 from shared.infra.dispatch import register_handlers

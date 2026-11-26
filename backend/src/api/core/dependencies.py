@@ -5,6 +5,7 @@ from typing import Annotated, Literal, cast
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import Depends
 
+from api.core.errors import APIError
 from api.core.security.request_identity import (
     RequestIdentity,
     request_identity,
@@ -24,8 +25,14 @@ async def current_principal(
     identity: FromDishka[IdentityModule],
 ) -> PrincipalView:
     if isinstance(credentials, BrowserCredentials):
+        session_token = require_cookie_session(credentials)
+        csrf_token = credentials.csrf_token if credentials.mutate else None
+        if credentials.mutate and csrf_token is None:
+            raise APIError(
+                401, "authentication_rejected", "Credentials or browser session are invalid"
+            )
         principal = await identity.query(
-            AuthenticateSessionQuery(require_cookie_session(credentials), credentials.project_id)
+            AuthenticateSessionQuery(session_token, credentials.project_id, csrf_token=csrf_token)
         )
         if principal.project_id is None or principal.role not in {"developer", "admin"}:
             raise PlatformRequestError("project_required", "Select an authorized project", 409)

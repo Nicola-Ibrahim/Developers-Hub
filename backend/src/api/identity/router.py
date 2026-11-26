@@ -16,7 +16,6 @@ from api.identity.principal.routes import router as principal_router
 from api.identity.profile.routes import router as profile_router
 from api.identity.sessions.routes import router as sessions_router
 from api.identity.tokens.routes import router as tokens_router
-from api.platform.projects.memberships import router as memberships_router
 from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
 from identity.application.interfaces.dispatch import IdentityModule
 
@@ -38,7 +37,6 @@ router.include_router(public_authentication_router)
 for feature_router in (
     authentication_router,
     sessions_router,
-    memberships_router,
     profile_router,
     tokens_router,
 ):

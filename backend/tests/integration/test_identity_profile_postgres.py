@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from test_browser_identity_postgres import ORIGIN, PASSWORD, PEPPER, seed_user
 from test_foundation_postgres import async_engine_for, dispatch_browser
 
-from composition.container import BackendContainer
+from backend import BackendContainer
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.interfaces.dispatch import IdentityModule
 from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery

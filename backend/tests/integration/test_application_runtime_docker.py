@@ -23,7 +23,7 @@ from devops_platform.application.interfaces.resources import (
 from devops_platform.application.interfaces.software_delivery import (
     ApplicationDeliveryFailure,
 )
-from devops_platform.infra.composition.application_bindings import (
+from devops_platform.infra.persistence.application_bindings import (
     SQLAlchemyApplicationDatabaseBindings,
 )
 from devops_platform.infra.persistence.models.delivery import ApplicationRow

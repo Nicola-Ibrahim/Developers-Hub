@@ -16,8 +16,8 @@ from identity.application.interfaces.identity_transactions import IdentityTransa
 from identity.application.interfaces.security import PasswordHasher, TokenGenerator, TokenHasher
 from identity.application.interfaces.session_tokens import SessionTokenIssuer, SessionTokenVerifier
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
-from identity.infra.composition.module import IDENTITY_HANDLER_REGISTRY, IDENTITY_REQUEST_MESSAGES
-from identity.infra.composition.module import IdentityModule as RequestIdentityModule
+from identity.infra.module import IDENTITY_HANDLER_REGISTRY, IDENTITY_REQUEST_MESSAGES
+from identity.infra.module import IdentityModule as RequestIdentityModule
 from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
 from identity.infra.security.jwt import JwtSessionTokens
 from identity.infra.security.opaque_secrets import PepperedTokenHasher, SecureTokenGenerator

@@ -66,7 +66,7 @@ def test_shared_denial_raises_the_transport_contract_exception() -> None:
 def test_read_projects_facts_can_be_built_for_each_distinct_subject_project() -> None:
     project_id = uuid4()
     access = AccessContext(uuid4(), project_id, "developer", frozenset(ALL_SCOPES))
-    message = ReadProjects((access,))
+    message = ReadProjects(access.user_id, (access,))
     facts = authorization_facts(message, access, project_id=project_id)
     assert facts.resource_kind == "projects"
     assert facts.project_id == project_id

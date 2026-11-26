@@ -8,13 +8,15 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from jwt import InvalidTokenError
 
+from identity.application.interfaces.session_tokens import SessionTokenIssuer, SessionTokenVerifier
+
 _ISSUER = "developers-hub"
 _AUDIENCE = "developers-hub-browser"
 _ALGORITHM = "HS256"
 _INFO = b"developers-hub/browser-session-jwt/v1"
 
 
-class JwtSessionTokens:
+class JwtSessionTokens(SessionTokenIssuer, SessionTokenVerifier):
     def __init__(self, token_pepper: str) -> None:
         self._key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=_INFO).derive(
             token_pepper.encode()

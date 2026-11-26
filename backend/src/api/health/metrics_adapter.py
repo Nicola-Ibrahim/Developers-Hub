@@ -3,11 +3,12 @@ import hmac
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from api.core.errors import APIError
+from api.health.metrics import OperationalMetrics
 from devops_platform.infra.observability.metrics import render_metrics
 from shared.infra.settings import Settings
 
 
-class DatabaseOperationalMetrics:
+class DatabaseOperationalMetrics(OperationalMetrics):
     def __init__(self, sessions: async_sessionmaker[AsyncSession], settings: Settings) -> None:
         self.sessions = sessions
         self.settings = settings

@@ -1,11 +1,12 @@
-from typing import Protocol
+from abc import ABC, abstractmethod
 
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 
-class OperationalMetrics(Protocol):
+class OperationalMetrics(ABC):
+    @abstractmethod
     async def render(self, authorization: str | None, client_host: str) -> str: ...
 
 

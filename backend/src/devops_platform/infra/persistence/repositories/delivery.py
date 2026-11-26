@@ -19,6 +19,18 @@ from sqlalchemy.orm import aliased
 from devops_platform.application.applications.create_application.command import (
     ApplicationRegistration,
 )
+from devops_platform.application.interfaces.applications import (
+    ApplicationCreationRepository,
+    ApplicationReadRepository,
+)
+from devops_platform.application.interfaces.software_delivery import (
+    ApplicationDeploymentRepository,
+    ApplicationResourceAttachmentRepository,
+    DeliveryRetryRepository,
+    DeliveryWorkQueue,
+    LocalPreviewRepository,
+    PreviewWebhookRepository,
+)
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import PlatformRequestError
 from devops_platform.application.software_delivery.attach_database.command import (
@@ -133,7 +145,16 @@ def _domain_step(row: ApplicationDeliveryStepRow) -> DeliveryStep:
     )
 
 
-class SQLAlchemyApplicationDeliveryRepository:
+class SQLAlchemyApplicationDeliveryRepository(
+    ApplicationCreationRepository,
+    ApplicationReadRepository,
+    ApplicationResourceAttachmentRepository,
+    LocalPreviewRepository,
+    ApplicationDeploymentRepository,
+    DeliveryWorkQueue,
+    PreviewWebhookRepository,
+    DeliveryRetryRepository,
+):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 

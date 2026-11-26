@@ -12,13 +12,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for
 
-from composition.integrations.project_access_persistence import (
-    SqlAlchemyIdentityProjectAccess,
-    identity_repositories_for_session,
-    project_access_repository_for_session,
-)
 from devops_platform.domain.value_objects.project_role import ProjectRole
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
+from devops_platform.infra.persistence.repositories.project_access import (
+    SQLAlchemyProjectAccessRepository,
+    SQLAlchemyProjectAccessRules,
+)
 from identity.application.accounts.complete_password_setup.command import (
     CompletePasswordSetupCommand,
 )
@@ -43,13 +42,14 @@ from identity.application.sessions.rotate_csrf.command import RotateCsrfCommand
 from identity.application.sessions.rotate_csrf.handler import RotateCsrfHandler
 from identity.domain.errors import IdentityValidationError
 from identity.domain.session_errors import SessionAuthenticationRejected
-from identity.infra.composition.identity_transactions import SqlAlchemyIdentityTransaction
+from identity.infra.persistence.identity_transactions import SqlAlchemyIdentityTransaction
 from identity.infra.persistence.models.activity import IdentityActivityRow
 from identity.infra.persistence.models.session import (
     LoginThrottleRow,
     SessionRow,
 )
 from identity.infra.persistence.models.user import InternalUserRow, PasswordSetupRow
+from identity.infra.persistence.repositories.sessions import identity_repositories_for_session
 from identity.infra.security.jwt import JwtSessionTokens
 from identity.infra.security.opaque_secrets import PepperedTokenHasher, SecureTokenGenerator
 from identity.infra.security.passwords import Argon2idPasswordHasher
@@ -60,6 +60,22 @@ pytestmark = pytest.mark.postgres
 PEPPER = "browser-test-pepper-" * 3
 ORIGIN = "http://localhost:3000"
 PASSWORD = "local-safe-test-password"
+
+
+def _identity_repositories(session):
+    return identity_repositories_for_session(session, SQLAlchemyProjectAccessRules(session))
+
+
+def _project_access_repository(session):
+    rules = SQLAlchemyProjectAccessRules(session)
+    _, activity = identity_repositories_for_session(session, rules)
+    return SQLAlchemyProjectAccessRepository(
+        session=session,
+        rules=rules,
+        user_row=InternalUserRow,
+        record_activity=activity.record_project_access_activity,
+        validation_error=IdentityValidationError,
+    )
 
 
 def test_deactivation_and_role_change_cannot_remove_both_admins(postgres_engine):
@@ -106,7 +122,7 @@ class IdentityFixture:
     def __init__(self, sessions, clock):
         self.sessions = sessions
         self.clock = clock
-        transaction = SqlAlchemyIdentityTransaction(sessions, identity_repositories_for_session)
+        transaction = SqlAlchemyIdentityTransaction(sessions, _identity_repositories)
         passwords = Argon2idPasswordHasher()
         tokens = SecureTokenGenerator()
         hasher = PepperedTokenHasher(PEPPER)
@@ -143,7 +159,7 @@ class IdentityFixture:
         class Action:
             async def execute(self, command):
                 session = fixture.sessions()
-                users, repository = identity_repositories_for_session(session)
+                users, repository = _identity_repositories(session)
                 handler = build_handler(users, repository)
                 return await SqlAlchemyUnitOfWork(session).run(
                     lambda: handler.execute(command), lambda result: result
@@ -157,7 +173,7 @@ class IdentityFixture:
     async def set_membership(self, actor_id, user_id, project_id, role):
         async with self.sessions() as session, session.begin():
             validated_role = ProjectRole.parse(role).value if role is not None else None
-            await project_access_repository_for_session(session).set_membership(
+            await _project_access_repository(session).set_membership(
                 actor_id=actor_id,
                 user_id=user_id,
                 project_id=project_id,
@@ -167,7 +183,7 @@ class IdentityFixture:
 
     async def list_project_members(self, _actor_id, project_id):
         async with self.sessions() as session, session.begin():
-            return await project_access_repository_for_session(session).list_project_members(
+            return await _project_access_repository(session).list_project_members(
                 project_id=project_id
             )
 
@@ -583,7 +599,7 @@ def test_membership_update_and_session_authorization_share_lock_order(postgres_e
 
         async def authorize():
             async with sessions() as session, session.begin():
-                _users, repository = identity_repositories_for_session(session)
+                _users, repository = _identity_repositories(session)
                 principal = await repository.authorize_session_operation(
                     digest, project_id, datetime.now(UTC)
                 )
@@ -624,8 +640,8 @@ def test_revocation_during_authority_lock_wait_is_revalidated(
 
         async def authorize():
             async with sessions() as session, session.begin():
-                _users, repository = identity_repositories_for_session(session)
-                original = SqlAlchemyIdentityProjectAccess.lock_user_project_access
+                _users, repository = _identity_repositories(session)
+                original = SQLAlchemyProjectAccessRules.lock_user_project_access
 
                 async def paused_lookup(project_access, user_id, additional_project_ids=()):
                     if project_access._session is session:
@@ -634,7 +650,7 @@ def test_revocation_during_authority_lock_wait_is_revalidated(
                     return await original(project_access, user_id, additional_project_ids)
 
                 monkeypatch.setattr(
-                    SqlAlchemyIdentityProjectAccess,
+                    SQLAlchemyProjectAccessRules,
                     "lock_user_project_access",
                     paused_lookup,
                 )

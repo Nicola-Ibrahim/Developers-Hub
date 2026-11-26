@@ -17,13 +17,13 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from api.app import create_app
-from composition.container import BackendContainer
+from backend import BackendContainer
 from identity.application.interfaces.dispatch import IdentityModule
 from identity.application.shared.errors import IdentityUnavailable
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.records import ApiTokenStatus
-from identity.infra.composition.api_token_transactions import SqlAlchemyApiTokenTransaction
+from identity.infra.persistence.api_token_transactions import SqlAlchemyApiTokenTransaction
 from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
@@ -360,8 +360,8 @@ def test_http_commit_failure_returns_503_without_success_response_start(monkeypa
     )
     session = FakeSession(fail_commit=SQLAlchemyError("database detail"))
     monkeypatch.setattr(
-        "composition.integrations.providers.api_token_repository_for_session",
-        lambda active: repository,
+        "backend.SQLAlchemyApiTokenRepository",
+        lambda active, access: repository,
     )
 
     class Overrides(Provider):

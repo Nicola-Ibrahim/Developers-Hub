@@ -1,4 +1,4 @@
-"""The HTTP host replaces untrusted message claims before platform dispatch."""
+"""Platform refreshes the authenticated caller role before authorization and dispatch."""
 
 import asyncio
 from uuid import uuid4
@@ -6,7 +6,6 @@ from uuid import uuid4
 import pytest
 from dishka import Scope
 
-from composition.integrations.platform_authorization import DeveloperPlatformModule
 from devops_platform.application.resource_management.get_resource.handler import (
     ReadResourceHandler,
 )
@@ -15,8 +14,7 @@ from devops_platform.application.resource_management.get_resource.query import (
 )
 from devops_platform.application.shared.errors import CatalogForbidden
 from devops_platform.domain.value_objects.access_context import AccessContext
-from identity.domain.interfaces.project_access import IdentityProjectAccess
-from shared.authorization.credentials import RequestCredentials
+from devops_platform.infra.module import DeveloperPlatformModule
 from shared.authorization.models import AuthorizationDecision
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
@@ -33,8 +31,8 @@ class Authorizer:
 
 def test_http_host_rechecks_trusted_access_and_rolls_back_denial(monkeypatch) -> None:
     project_id = uuid4()
-    forged = AccessContext(uuid4(), project_id, "admin", frozenset({"resources:read"}))
-    trusted = AccessContext(uuid4(), project_id, "developer", frozenset())
+    supplied = AccessContext(uuid4(), project_id, "admin", frozenset({"resources:read"}))
+    trusted = AccessContext(supplied.user_id, project_id, "developer", supplied.scopes)
     events: list[str] = []
 
     class Session:
@@ -65,8 +63,6 @@ def test_http_host_rechecks_trusted_access_and_rolls_back_denial(monkeypatch) ->
             return False
 
         async def get(self, kind, *, component=""):
-            if kind is IdentityProjectAccess:
-                return object()
             if kind is SqlAlchemyUnitOfWork:
                 assert component == "platform_action"
                 return Unit()
@@ -79,25 +75,27 @@ def test_http_host_rechecks_trusted_access_and_rolls_back_denial(monkeypatch) ->
 
             return Handler()
 
-    async def authenticate(*_args):
-        events.append("authenticate")
-        return trusted
+    async def project_roles(_session, actor_id, project_ids, *, membership_target_id):
+        assert (actor_id, project_ids, membership_target_id) == (
+            trusted.user_id,
+            (project_id,),
+            None,
+        )
+        events.append("membership")
+        return {project_id: trusted.role}
 
-    monkeypatch.setattr(
-        "composition.integrations.platform_authorization.authenticate_platform_access", authenticate
-    )
-    credentials = RequestCredentials("private-token")
-    host = DeveloperPlatformModule(Container(), credentials, object(), Authorizer(False))
+    monkeypatch.setattr("devops_platform.infra.module.project_roles_for_operation", project_roles)
+    host = DeveloperPlatformModule(Container(), Authorizer(False))
 
     with pytest.raises(CatalogForbidden):
-        asyncio.run(host.query(ReadResource(forged, uuid4())))
-    assert events == ["authenticate", "rollback"]
+        asyncio.run(host.query(ReadResource(supplied, uuid4())))
+    assert events == ["membership", "rollback"]
 
 
-def test_http_host_dispatches_with_authenticated_actor_not_message_claims(monkeypatch) -> None:
+def test_http_host_preserves_authenticated_actor_and_refreshes_project_role(monkeypatch) -> None:
     project_id = uuid4()
-    forged = AccessContext(uuid4(), project_id, "admin", frozenset({"resources:read"}))
-    trusted = AccessContext(uuid4(), project_id, "developer", frozenset({"resources:read"}))
+    supplied = AccessContext(uuid4(), project_id, "admin", frozenset({"resources:read"}))
+    trusted = AccessContext(supplied.user_id, project_id, "developer", supplied.scopes)
     events: list[str] = []
 
     class Session:
@@ -124,8 +122,6 @@ def test_http_host_dispatches_with_authenticated_actor_not_message_claims(monkey
             return False
 
         async def get(self, kind, *, component=""):
-            if kind is IdentityProjectAccess:
-                return object()
             if kind is SqlAlchemyUnitOfWork:
                 assert component == "platform_action"
                 return Unit()
@@ -138,18 +134,20 @@ def test_http_host_dispatches_with_authenticated_actor_not_message_claims(monkey
 
             return Handler()
 
-    async def authenticate(*_args):
-        events.append("authenticate")
-        return trusted
+    async def project_roles(_session, actor_id, project_ids, *, membership_target_id):
+        assert (actor_id, project_ids, membership_target_id) == (
+            trusted.user_id,
+            (project_id,),
+            None,
+        )
+        events.append("membership")
+        return {project_id: trusted.role}
 
-    monkeypatch.setattr(
-        "composition.integrations.platform_authorization.authenticate_platform_access", authenticate
-    )
-    credentials = RequestCredentials("private-token")
+    monkeypatch.setattr("devops_platform.infra.module.project_roles_for_operation", project_roles)
     authorizer = Authorizer(True)
-    host = DeveloperPlatformModule(Container(), credentials, object(), authorizer)
+    host = DeveloperPlatformModule(Container(), authorizer)
 
-    assert asyncio.run(host.query(ReadResource(forged, uuid4()))) == trusted
+    assert asyncio.run(host.query(ReadResource(supplied, uuid4()))) == trusted
     assert authorizer.requests[0].subject_id == trusted.user_id
     assert authorizer.requests[0].scopes == ("resources:read",)
-    assert events == ["authenticate", "dispatch", "commit"]
+    assert events == ["membership", "dispatch", "commit"]

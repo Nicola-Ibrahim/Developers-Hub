@@ -6,12 +6,14 @@ import hmac
 from argon2 import PasswordHasher as Argon2PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
+from identity.application.interfaces.security import PasswordHasher
+
 _SCRYPT_N = 1 << 14
 _SCRYPT_R = 8
 _SCRYPT_P = 1
 
 
-class Argon2idPasswordHasher:
+class Argon2idPasswordHasher(PasswordHasher):
     def __init__(self) -> None:
         self._argon2 = Argon2PasswordHasher()
         self._dummy_hash = self._argon2.hash("devops-hub-dummy-password-value")

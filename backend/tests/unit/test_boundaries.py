@@ -14,11 +14,12 @@ from shared.infra.settings import Settings
 
 BACKEND = Path(__file__).parents[2]
 SRC = BACKEND / "src"
-ROOTS = {"api", "identity", "devops_platform", "shared", "composition"}
+ROOTS = {"api", "identity", "devops_platform", "shared"}
 CONTEXTS = {"identity", "devops_platform"}
 RETIRED_ROOTS = {
     "containers",
     "entrypoints",
+    "composition",
     "bootstrap",
     "provisioning",
     "platform_runtime",
@@ -45,14 +46,15 @@ IO_LIBRARIES = {
     "secrets",
 }
 
-# Shared PostgreSQL joins during the project-access ownership migration.
-# Application and domain imports remain isolated.
-SHARED_SCHEMA_IMPORTS = {
+# Cross-context dependencies of Platform persistence.
+PROJECT_ACCESS_IMPORTS = {
     "devops_platform.infra.persistence.repositories.project_access": {
+        "identity.domain.interfaces.project_access",
+        "identity.domain.interfaces.project_access.IdentityProjectAccess",
         "identity.infra.persistence.models.user",
         "identity.infra.persistence.models.user.InternalUserRow",
     },
-    "devops_platform.infra.composition.resource_request_authority": {
+    "devops_platform.infra.persistence.resource_request_authority": {
         "identity.infra.persistence.models.user",
         "identity.infra.persistence.models.user.InternalUserRow",
     },
@@ -82,7 +84,7 @@ def context_name(module):
 
 
 def violation(module, target):
-    if target in SHARED_SCHEMA_IMPORTS.get(module, ()):
+    if target in PROJECT_ACCESS_IMPORTS.get(module, ()):
         return False
     root = module.split(".")[0]
     other = target.split(".")[0]
@@ -96,18 +98,20 @@ def violation(module, target):
         return module_context is not None and module_parts[1:2] in (["application"], ["domain"])
     if module_context:
         layer_parts = module_parts[1:2]
-        if module.startswith(module_context + ".infra.workers.") and other == "composition":
+        if module.startswith(module_context + ".infra.workers.") and other == "backend":
             return False
         if target in {
             "shared.application.interfaces.unit_of_work",
             "shared.application.interfaces.unit_of_work.UnitOfWork",
+            "shared.application.interfaces.readiness",
+            "shared.application.interfaces.readiness.ReadinessProbe",
         }:
             return False
         if target == "shared.dispatch" or target.startswith("shared.dispatch."):
             return False  # Pure cross-context message/handler contract.
         if (target_context is not None and target_context != module_context) or other in {
             "api",
-            "composition",
+            "backend",
             "containers",
             "entrypoints",
         }:
@@ -120,7 +124,7 @@ def violation(module, target):
         if layer_parts == ["infra"]:
             if (target_context is not None and target_context != module_context) or other in {
                 "api",
-                "composition",
+                "backend",
                 "containers",
                 "entrypoints",
             }:
@@ -132,7 +136,7 @@ def violation(module, target):
     if root == "shared":
         return target_context is not None or other in {
             "api",
-            "composition",
+            "backend",
             "containers",
             "entrypoints",
         }
@@ -152,7 +156,7 @@ def violation(module, target):
             is_context_infrastructure = target_context is not None and "infra" in target_parts
             if is_context_infrastructure or target.startswith("shared.infra."):
                 return False
-            if module == "api.app" and other == "composition":
+            if module == "api.app" and other == "backend":
                 return False
             if (module in {"api.app", "api.health.metrics_adapter"}) and other in {
                 "dishka",
@@ -163,7 +167,7 @@ def violation(module, target):
             other
             in {
                 "shared",
-                "composition",
+                "backend",
                 "containers",
                 "entrypoints",
                 "sqlalchemy",
@@ -172,12 +176,12 @@ def violation(module, target):
             }
             or "infra" in target_parts[1:]
         )
-    if root == "composition":
+    if root == "backend":
         http_bindings = ("api.health.metrics", "api.health.metrics_adapter", "api.settings.config")
         return other in {"containers", "entrypoints"} or (
             other == "api"
             and (
-                module != "composition.container"
+                module != "backend"
                 or not any(
                     target == path or target.startswith(path + ".") or path.startswith(target + ".")
                     for path in http_bindings
@@ -202,7 +206,10 @@ def test_source_import_contracts():
     import platform
 
     assert SRC not in Path(platform.__file__).resolve().parents
-    sources = {}
+    for context in CONTEXTS:
+        assert not (SRC / context / "infra" / "composition").exists()
+        assert (SRC / context / "infra" / "module.py").is_file()
+    sources = {"backend": ((SRC / "backend.py").read_text(), False)}
     for root in ROOTS:
         for path in (SRC / root).rglob("*.py"):
             parts = path.relative_to(SRC).with_suffix("").parts
@@ -267,8 +274,8 @@ def test_indirect_package_reexport_cannot_smuggle_infrastructure_into_core():
             True,
         ),
         (
-            "composition.integrations.platform_dispatch",
-            "from devops_platform.infra.composition import module",
+            "backend",
+            "from devops_platform.infra import module",
             False,
         ),
         ("shared.infra.database", "import containers.http", True),
@@ -281,7 +288,7 @@ def test_indirect_package_reexport_cannot_smuggle_infrastructure_into_core():
         ("identity.infra.persistence", "import shared", False),
         ("identity.infra.persistence", "from shared.domain import value", True),
         ("identity.infra.persistence", "from api import errors", True),
-        ("identity.infra.persistence", "from bootstrap import settings", True),
+        ("identity.infra.persistence", "from backend import settings", True),
     ],
 )
 def test_checker_resolves_relative_imports_and_reexports(module, source, forbidden):

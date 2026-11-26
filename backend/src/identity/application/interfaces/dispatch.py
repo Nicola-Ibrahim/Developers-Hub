@@ -1,7 +1,8 @@
 """Public dispatch contract for identity commands and queries."""
 
+from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import Protocol, TypeVar
+from typing import TypeVar
 
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.interfaces.session_repository import SessionRepository
@@ -14,7 +15,9 @@ ActionPrecondition = Callable[
 ]
 
 
-class IdentityModule(Protocol):
+class IdentityModule(ABC):
+    @abstractmethod
     async def execute(self, command: Command[ResultT]) -> ResultT: ...
 
+    @abstractmethod
     async def query(self, query: Query[ResultT]) -> ResultT: ...

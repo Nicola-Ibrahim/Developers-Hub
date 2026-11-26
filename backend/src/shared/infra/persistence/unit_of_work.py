@@ -7,6 +7,8 @@ from typing import TypeVar
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from shared.application.interfaces.unit_of_work import UnitOfWork
+
 T = TypeVar("T")
 R = TypeVar("R")
 
@@ -15,7 +17,7 @@ class DatabaseUnavailable(Exception):
     """Sanitized technical failure, translated by the owning host adapter."""
 
 
-class SqlAlchemyUnitOfWork:
+class SqlAlchemyUnitOfWork(UnitOfWork):
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.committed = False

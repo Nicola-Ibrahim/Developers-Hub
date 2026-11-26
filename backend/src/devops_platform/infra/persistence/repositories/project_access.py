@@ -10,42 +10,18 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from devops_platform.application.interfaces.project_access import ProjectAccessRepository
 from devops_platform.domain.aggregates.project_access import ProjectAccess
 from devops_platform.domain.errors import DomainError
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
+from identity.domain.interfaces.project_access import IdentityProjectAccess
 from identity.infra.persistence.models.user import InternalUserRow
 
 AuditActivity = Callable[[UUID | None, UUID, UUID | None, str, str, datetime], Awaitable[None]]
 ValidationErrorFactory = Callable[[str], Exception]
-
-
-async def project_memberships(
-    session: AsyncSession, user_id: UUID
-) -> tuple[tuple[UUID, str, str], ...]:
-    rows = (
-        await session.execute(
-            select(ProjectMembershipRow.project_id, ProjectRow.name, ProjectMembershipRow.role)
-            .join(ProjectRow, ProjectRow.id == ProjectMembershipRow.project_id)
-            .where(ProjectMembershipRow.user_id == user_id)
-            .order_by(ProjectRow.name)
-        )
-    ).all()
-    return tuple((project_id, name, role) for project_id, name, role in rows)
-
-
-async def project_membership_role(
-    session: AsyncSession, user_id: UUID, project_id: UUID
-) -> str | None:
-    role: str | None = await session.scalar(
-        select(ProjectMembershipRow.role).where(
-            ProjectMembershipRow.user_id == user_id,
-            ProjectMembershipRow.project_id == project_id,
-        )
-    )
-    return role
 
 
 async def _project_ids_for_member(session: AsyncSession, user_id: UUID) -> tuple[UUID, ...]:
@@ -57,33 +33,62 @@ async def _project_ids_for_member(session: AsyncSession, user_id: UUID) -> tuple
     return tuple(ids.all())
 
 
-async def lock_user_project_access(
-    session: AsyncSession, user_id: UUID, additional_project_ids: tuple[UUID, ...] = ()
-) -> tuple[UUID, ...] | None:
-    """Lock the known membership scope in UUID order before user/session rows."""
-    initial = await _project_ids_for_member(session, user_id)
-    project_ids = tuple(sorted(set(initial).union(additional_project_ids)))
-    if project_ids:
-        locked_projects = await session.scalars(
-            select(ProjectRow)
-            .where(ProjectRow.id.in_(project_ids))
-            .order_by(ProjectRow.id)
-            .with_for_update()
-        )
-        locked_projects.all()
-    current = await _project_ids_for_member(session, user_id)
-    # A membership added on a project outside the initial lock set means the
-    # caller must retry in a fresh transaction to preserve the global order.
-    if not set(current).issubset(project_ids):
-        return None
-    return current
-
-
-class SQLAlchemyProjectAccessRules:
+class SQLAlchemyProjectAccessRules(IdentityProjectAccess):
     """Queries and updates enforcing project membership invariants."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def project_memberships(self, user_id: UUID) -> tuple[tuple[UUID, str, str], ...]:
+        rows = (
+            await self._session.execute(
+                select(ProjectMembershipRow.project_id, ProjectRow.name, ProjectMembershipRow.role)
+                .join(ProjectRow, ProjectRow.id == ProjectMembershipRow.project_id)
+                .where(ProjectMembershipRow.user_id == user_id)
+                .order_by(ProjectRow.name)
+            )
+        ).all()
+        return tuple((project_id, name, role) for project_id, name, role in rows)
+
+    async def project_membership_role(self, user_id: UUID, project_id: UUID) -> str | None:
+        role: str | None = await self._session.scalar(
+            self._membership_role_query(user_id, project_id)
+        )
+        return role
+
+    async def lock_project_membership_role(
+        self, user_id: UUID, project_id: UUID, *, shared: bool
+    ) -> str | None:
+        query = self._membership_role_query(user_id, project_id)
+        role: str | None = await self._session.scalar(query.with_for_update(read=shared))
+        return role
+
+    @staticmethod
+    def _membership_role_query(user_id: UUID, project_id: UUID) -> Select[tuple[str]]:
+        return select(ProjectMembershipRow.role).where(
+            ProjectMembershipRow.user_id == user_id,
+            ProjectMembershipRow.project_id == project_id,
+        )
+
+    async def lock_user_project_access(
+        self, user_id: UUID, additional_project_ids: tuple[UUID, ...] = ()
+    ) -> tuple[UUID, ...] | None:
+        """Lock the known membership scope in UUID order before user/session rows."""
+        initial = await _project_ids_for_member(self._session, user_id)
+        project_ids = tuple(sorted(set(initial).union(additional_project_ids)))
+        if project_ids:
+            locked_projects = await self._session.scalars(
+                select(ProjectRow)
+                .where(ProjectRow.id.in_(project_ids))
+                .order_by(ProjectRow.id)
+                .with_for_update()
+            )
+            locked_projects.all()
+        current = await _project_ids_for_member(self._session, user_id)
+        # A membership outside the lock set requires a fresh transaction to preserve lock order.
+        if not set(current).issubset(project_ids):
+            return None
+        return current
 
     async def active_admin_count(self, project_id: UUID) -> int:
         count = await self._session.scalar(
@@ -112,7 +117,7 @@ class SQLAlchemyProjectAccessRules:
         if await _project_ids_for_member(self._session, user_id) != locked_project_ids:
             return "Project membership changed concurrently; retry account deactivation"
         for project_id in locked_project_ids:
-            if await project_membership_role(self._session, user_id, project_id) == "admin":
+            if await self.project_membership_role(user_id, project_id) == "admin":
                 access = ProjectAccess(await self.active_admin_count(project_id))
                 if not access.may_remove_active_admin(removing_admin=True):
                     return "A project must retain at least one active administrator"
@@ -126,7 +131,7 @@ class SQLAlchemyProjectAccessRules:
         )
 
 
-class SQLAlchemyProjectAccessRepository:
+class SQLAlchemyProjectAccessRepository(ProjectAccessRepository):
     def __init__(
         self,
         session: AsyncSession,

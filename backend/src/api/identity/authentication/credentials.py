@@ -29,11 +29,10 @@ def browser_credentials(request: Request) -> BrowserCredentials:
     except ValueError:
         raise APIError(400, "invalid_project", "Project header must be a UUID") from None
     return BrowserCredentials(
-        cookie,
-        project_id,
-        request.headers.get(CSRF_HEADER),
-        request.headers.get("origin"),
-        request.method not in {"GET", "HEAD", "OPTIONS"},
+        session_token=cookie,
+        project_id=project_id,
+        csrf_token=request.headers.get(CSRF_HEADER),
+        mutate=request.method not in {"GET", "HEAD", "OPTIONS"},
     )
 
 

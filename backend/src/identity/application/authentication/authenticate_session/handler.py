@@ -34,6 +34,17 @@ class AuthenticateSessionHandler:
         self.hasher = hasher
 
     async def execute(self, query: AuthenticateSessionQuery) -> SessionPrincipal:
+        if query.csrf_token is not None:
+            digest = self.hasher.digest(query.session_token)
+            principal = await self.repository.authorize_session_operation(
+                digest, query.project_id, datetime.now(UTC), lock_for_mutation=True
+            )
+            if principal is None or not await self.repository.validate_csrf(
+                digest, self.hasher.digest(query.csrf_token)
+            ):
+                raise SessionAuthenticationRejected()
+            return principal
+
         return await authenticate_session(
             self.repository,
             self.hasher,

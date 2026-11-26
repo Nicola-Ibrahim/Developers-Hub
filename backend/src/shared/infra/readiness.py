@@ -4,10 +4,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from shared.application.interfaces.readiness import ReadinessStatus
+from shared.application.interfaces.readiness import ReadinessProbe, ReadinessStatus
 
 
-class SqlAlchemyReadinessProbe:
+class SqlAlchemyReadinessProbe(ReadinessProbe):
     def __init__(self, engine: AsyncEngine, revision: str) -> None:
         self.engine = engine
         self.revision = revision

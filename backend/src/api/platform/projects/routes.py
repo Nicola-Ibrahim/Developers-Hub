@@ -53,6 +53,7 @@ async def projects(
         principal = await identity.query(
             AuthenticateSessionQuery(require_cookie_session(credentials))
         )
+        user_id = principal.user_id
         accesses = tuple(
             AccessContext(
                 principal.user_id,
@@ -61,9 +62,11 @@ async def projects(
                 frozenset(ALL_SCOPES),
             )
             for member in principal.memberships
+            if member.role in {"developer", "admin"}
         )
     else:
         token_principal = await identity.query(AuthenticateApiTokenQuery(credentials))
+        user_id = token_principal.user_id
         accesses = (
             AccessContext(
                 token_principal.user_id,
@@ -72,6 +75,6 @@ async def projects(
                 token_principal.scopes,
             ),
         )
-    message = ReadProjects(accesses)
+    message = ReadProjects(user_id, accesses)
     rows = await module.query(message)
     return [ProjectRegistrationView.model_validate(asdict(row)) for row in rows]

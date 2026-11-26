@@ -221,8 +221,8 @@ def test_packaged_stack():
 import asyncio, json
 from datetime import UTC, datetime
 from pathlib import Path
-from composition.container import BackendContainer
-from composition.integrations.project_registration import RegisterProjectCommandHandler
+from backend import BackendContainer
+from devops_platform.infra.project_registration import RegisterProjectCommandHandler
 from devops_platform.application.project_access.bootstrap_first_admin.command import (
     BootstrapFirstAdmin,
 )

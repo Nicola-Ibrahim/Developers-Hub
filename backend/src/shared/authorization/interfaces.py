@@ -1,6 +1,6 @@
 """Application boundary for policy evaluation."""
 
-from typing import Protocol
+from abc import ABC, abstractmethod
 
 from shared.authorization.models import AuthorizationDecision, AuthorizationRequest
 
@@ -19,5 +19,6 @@ class AuthorizationUnavailable(Exception):
     """Policy decision could not be obtained or validated."""
 
 
-class AuthorizationDecisionPort(Protocol):
+class AuthorizationDecisionPort(ABC):
+    @abstractmethod
     async def evaluate(self, request: AuthorizationRequest) -> AuthorizationDecision: ...

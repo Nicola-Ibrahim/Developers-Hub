@@ -6,7 +6,7 @@ from uuid import uuid4
 from dishka import Provider, Scope, make_async_container, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from composition.integrations.providers import IdentityActionIntegrationProvider
+from backend import IdentityActionProvider as IdentityActionIntegrationProvider
 from identity.application.api_tokens.manage_personal_tokens import CreatePersonalTokenHandler
 from identity.application.authentication.authenticate_session.handler import (
     AuthenticateSessionHandler,
@@ -27,8 +27,8 @@ from identity.application.sessions.select_active_project.handler import SelectAc
 from identity.domain.aggregates.session import Session
 from identity.domain.records import SessionPrincipal
 from identity.domain.value_objects.session_expiry import SessionExpiry
-from identity.infra.composition.action_provider import IdentityActionProvider
-from identity.infra.composition.providers import IdentityTokenScopePolicy
+from identity.infra.di.action_provider import IdentityActionProvider
+from identity.infra.di.providers import IdentityTokenScopePolicy
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
 

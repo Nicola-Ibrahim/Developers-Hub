@@ -37,12 +37,12 @@ from identity.application.sessions.select_active_project.command import (
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.domain.interfaces.session_repository import SessionRepository
 from identity.domain.records import SessionPrincipal
-from identity.infra.composition.api_token_transactions import (
-    SqlAlchemyApiTokenTransaction,
-)
-from identity.infra.composition.module import (
+from identity.infra.module import (
     IDENTITY_HANDLER_REGISTRY,
     IdentityModule,
+)
+from identity.infra.persistence.api_token_transactions import (
+    SqlAlchemyApiTokenTransaction,
 )
 from shared.authorization.credentials import RequestCredentials, SessionCredentials
 from shared.authorization.interfaces import (

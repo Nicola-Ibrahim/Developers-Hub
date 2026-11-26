@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from dishka import Provider
 
 from identity import application
-from identity.infra.composition.action_provider import IdentityActionProvider
-from identity.infra.composition.module import IDENTITY_HANDLER_REGISTRY
-from identity.infra.composition.providers import IdentityProvider, IdentityTokenScopePolicy
+from identity.infra.di.action_provider import IdentityActionProvider
+from identity.infra.di.providers import IdentityProvider, IdentityTokenScopePolicy
+from identity.infra.module import IDENTITY_HANDLER_REGISTRY
 from shared.infra.dispatch import validate_context_messages
 
 

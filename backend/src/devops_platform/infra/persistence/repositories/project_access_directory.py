@@ -4,12 +4,15 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from devops_platform.domain.interfaces.project_access_directory import ProjectAccessReferences
+from devops_platform.domain.interfaces.project_access_directory import (
+    ProjectAccessDirectory,
+    ProjectAccessReferences,
+)
 from devops_platform.infra.persistence.models.project_access import ProjectRow, TeamRow
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable
 
 
-class SQLAlchemyProjectAccessDirectory:
+class SQLAlchemyProjectAccessDirectory(ProjectAccessDirectory):
     """Register project and team references without creating memberships or committing."""
 
     def __init__(self, session: AsyncSession) -> None:

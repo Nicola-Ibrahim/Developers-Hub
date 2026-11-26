@@ -17,12 +17,14 @@ from sqlalchemy.pool import NullPool
 
 from api.app import create_app
 from api.core.errors import APIError
-from composition.container import BackendContainer
-from composition.integrations.project_access_persistence import api_token_repository_for_session
-from composition.integrations.project_registration import RegisterProjectCommandHandler
+from backend import BackendContainer
 from devops_platform.application.projects.command import RegisterProjectCommand
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
 from devops_platform.infra.persistence.models.resources import Resource
+from devops_platform.infra.persistence.repositories.project_access import (
+    SQLAlchemyProjectAccessRules,
+)
+from devops_platform.infra.project_registration import RegisterProjectCommandHandler
 from identity.application.api_tokens.personal_token_messages import CreatePersonalTokenCommand
 from identity.application.api_tokens.revoke_api_token.command import RevokeApiTokenCommand
 from identity.application.api_tokens.revoke_api_token.handler import RevokeApiTokenHandler
@@ -30,6 +32,7 @@ from identity.application.interfaces.dispatch import IdentityModule
 from identity.infra.persistence.models.api_token import ApiAccessTokenRow
 from identity.infra.persistence.models.session import SessionRow
 from identity.infra.persistence.models.user import InternalUserRow
+from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
 from identity.infra.security.opaque_secrets import PepperedTokenHasher
 from migrations.metadata import registered_metadata
 from shared.authorization.credentials import RequestCredentials, SessionCredentials
@@ -332,6 +335,81 @@ def test_pre_refactor_token_digest_still_authenticates(postgres_engine):
         )
 
 
+def test_token_authentication_observes_role_committed_during_lock_wait(postgres_engine):
+    user_id, project_id = uuid4(), uuid4()
+    digest = PepperedTokenHasher(PEPPER).digest("synthetic-token-for-membership-lock-test")
+    with Session(postgres_engine) as session, session.begin():
+        session.add_all(
+            [
+                InternalUserRow(id=user_id, name=f"user-{user_id}", active=True),
+                ProjectRow(id=project_id, name=f"project-{project_id}"),
+            ]
+        )
+        session.flush()
+        session.add_all(
+            [
+                ProjectMembershipRow(user_id=user_id, project_id=project_id, role="admin"),
+                ApiAccessTokenRow(
+                    user_id=user_id,
+                    project_id=project_id,
+                    digest=digest,
+                    scopes=["resources:read"],
+                    expires_at=datetime.now(UTC) + timedelta(hours=1),
+                ),
+            ]
+        )
+
+    database = async_engine_for(postgres_engine)
+    sessions = async_sessionmaker(database)
+
+    async def exercise():
+        lookup_started = asyncio.Event()
+        lookup_pid = None
+
+        async def authenticate():
+            nonlocal lookup_pid
+            async with sessions.begin() as session:
+                lookup_pid = await session.scalar(text("SELECT pg_backend_pid()"))
+                lookup_started.set()
+                repository = SQLAlchemyApiTokenRepository(
+                    session, SQLAlchemyProjectAccessRules(session)
+                )
+                return await repository.find_token_credential(digest)
+
+        lookup = None
+        try:
+            async with asyncio.timeout(10):
+                async with sessions.begin() as writer:
+                    writer_pid = await writer.scalar(text("SELECT pg_backend_pid()"))
+                    membership = await writer.get(ProjectMembershipRow, (user_id, project_id))
+                    assert membership is not None
+                    membership.role = "developer"
+                    await writer.flush()
+                    lookup = asyncio.create_task(authenticate())
+                    await lookup_started.wait()
+                    while True:
+                        blockers = await writer.scalar(
+                            text("SELECT pg_blocking_pids(:pid)"), {"pid": lookup_pid}
+                        )
+                        if writer_pid in blockers:
+                            break
+                        if lookup.done():
+                            pytest.fail(
+                                f"Token lookup did not wait for membership: {lookup.result()!r}"
+                            )
+                        await asyncio.sleep(0.01)
+                return await lookup
+        finally:
+            if lookup is not None and not lookup.done():
+                lookup.cancel()
+                await asyncio.gather(lookup, return_exceptions=True)
+            await database.dispose()
+
+    snapshot = asyncio.run(exercise())
+    assert snapshot is not None
+    assert snapshot.role == "developer"
+
+
 def test_disabled_account_cannot_receive_token_for_current_membership(postgres_engine):
     token_id, _ = issue(postgres_engine)
     from devops_platform.infra.persistence.models.project_access import ProjectRow
@@ -422,7 +500,9 @@ def test_concurrent_token_revocation_preserves_first_timestamp_and_single_audit(
         async def run(self, action):
             async with sessions() as session:
                 unit = SqlAlchemyUnitOfWork(session)
-                repository = api_token_repository_for_session(session)
+                repository = SQLAlchemyApiTokenRepository(
+                    session, SQLAlchemyProjectAccessRules(session)
+                )
 
                 class PausingRepository:
                     async def find_api_token(self, token_id):
@@ -447,7 +527,9 @@ def test_concurrent_token_revocation_preserves_first_timestamp_and_single_audit(
         async def run(self, action):
             async with sessions() as session:
                 unit = SqlAlchemyUnitOfWork(session)
-                repository = api_token_repository_for_session(session)
+                repository = SQLAlchemyApiTokenRepository(
+                    session, SQLAlchemyProjectAccessRules(session)
+                )
 
                 async def run_action():
                     backend_pids["second"] = await session.scalar(text("SELECT pg_backend_pid()"))

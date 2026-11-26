@@ -1,7 +1,7 @@
 """Project and team references required by project registration."""
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Protocol
 from uuid import UUID
 
 
@@ -11,7 +11,8 @@ class ProjectAccessReferences:
     team_id: UUID
 
 
-class ProjectAccessDirectory(Protocol):
+class ProjectAccessDirectory(ABC):
+    @abstractmethod
     async def register_references(
         self, project_name: str, team_name: str
     ) -> ProjectAccessReferences: ...

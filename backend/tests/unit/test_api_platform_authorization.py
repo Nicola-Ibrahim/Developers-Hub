@@ -8,11 +8,9 @@ from dishka import Scope
 
 from api.platform.application_delivery.routes import applications
 from api.platform.catalog.routes import catalog
-from composition.integrations.platform_authorization import DeveloperPlatformModule
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import CatalogForbidden, PlatformRequestError
-from identity.domain.interfaces.project_access import IdentityProjectAccess
-from shared.authorization.credentials import RequestCredentials
+from devops_platform.infra.module import DeveloperPlatformModule
 from shared.authorization.models import AuthorizationDecision
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
@@ -36,7 +34,7 @@ class DenyAuthorization:
 
 
 @pytest.mark.parametrize("route", [catalog, applications])
-def test_denied_platform_action_does_not_dispatch(route) -> None:
+def test_denied_platform_action_does_not_dispatch(route, monkeypatch) -> None:
     access = AccessContext(
         user_id=uuid4(),
         project_id=uuid4(),
@@ -67,27 +65,19 @@ def test_denied_platform_action_does_not_dispatch(route) -> None:
         async def get(self, kind, *, component=""):
             if kind is SqlAlchemyUnitOfWork:
                 return Unit()
-            if kind is IdentityProjectAccess:
-                return object()
             self.handler_resolutions.append(kind)
             return RecordingModule()
 
-    async def authenticate(*_args):
-        return access
+    async def project_roles(*_args, **_kwargs):
+        return {access.project_id: access.role}
 
-    from unittest.mock import patch
-
+    monkeypatch.setattr("devops_platform.infra.module.project_roles_for_operation", project_roles)
     handler = route.__dishka_orig_func__
-    credentials = RequestCredentials("private-test-token")
-    host = DeveloperPlatformModule(Container(), credentials, object(), DenyAuthorization())
+    host = DeveloperPlatformModule(Container(), DenyAuthorization())
 
     async def invoke() -> None:
-        with patch(
-            "composition.integrations.platform_authorization.authenticate_platform_access",
-            authenticate,
-        ):
-            with pytest.raises((CatalogForbidden, PlatformRequestError)):
-                await handler(access, host)
+        with pytest.raises((CatalogForbidden, PlatformRequestError)):
+            await handler(access, host)
 
     asyncio.run(invoke())
     assert host._container.handler_resolutions == []

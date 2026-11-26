@@ -16,6 +16,7 @@ from devops_platform.application.interfaces.resources import (
     DeletionObservation,
     ProviderFailure,
     ProvisioningJob,
+    ProvisioningQueue,
     ResourceCredentialCipher,
 )
 from devops_platform.infra.persistence.models.resources import (
@@ -28,7 +29,7 @@ from devops_platform.infra.persistence.models.resources import (
 from devops_platform.infra.persistence.repositories.resource import SQLAlchemyResourceRepository
 
 
-class SqlAlchemyProvisioningQueue:
+class SqlAlchemyProvisioningQueue(ProvisioningQueue):
     def __init__(
         self,
         sessions: async_sessionmaker[AsyncSession],

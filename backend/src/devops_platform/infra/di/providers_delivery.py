@@ -25,7 +25,7 @@ from devops_platform.application.interfaces.software_delivery import (
     TemplateCatalog,
     WebhookSignatureVerifier,
 )
-from devops_platform.infra.composition.application_bindings import (
+from devops_platform.infra.persistence.application_bindings import (
     SQLAlchemyApplicationDatabaseBindings,
 )
 from devops_platform.infra.persistence.repositories.delivery import (

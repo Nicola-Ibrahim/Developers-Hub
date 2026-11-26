@@ -10,7 +10,7 @@ from test_browser_identity_postgres import ORIGIN, PASSWORD, PEPPER, seed_user
 from test_foundation_postgres import async_engine_for, client_for
 
 from api.app import create_app
-from composition.container import BackendContainer
+from backend import BackendContainer
 from devops_platform.application.resource_management.catalog.query import ReadCatalog
 from identity.application.profile.update_profile import UpdateProfileCommand
 from identity.infra.persistence.models.user import InternalUserRow

@@ -5,7 +5,7 @@ import asyncio
 from dishka import Scope
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from composition.container import BackendContainer
+from backend import BackendContainer
 from devops_platform.application.interfaces.resources import ResourceRepository
 from devops_platform.application.resource_management.list_resources.handler import (
     ReadResourcesHandler,
@@ -22,7 +22,7 @@ from devops_platform.application.resource_management.renew_lease.handler import 
 from devops_platform.application.resource_management.submit_database_request.handler import (
     RequestTemporaryDatabaseHandler,
 )
-from devops_platform.infra.composition.module import PLATFORM_HANDLER_REGISTRY
+from devops_platform.infra.handlers import PLATFORM_HANDLER_REGISTRY
 from shared.infra.settings import Settings
 
 

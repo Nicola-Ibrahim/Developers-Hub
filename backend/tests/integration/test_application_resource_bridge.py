@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for, client_for, issue
 
-from composition.integrations.application_resources import LedgerApplicationResources
 from devops_platform.application.interfaces.software_delivery import (
     ApplicationDeliveryFailure,
 )
@@ -20,7 +19,7 @@ from devops_platform.application.resource_management.catalog.models import Postg
 from devops_platform.application.software_delivery.attach_database.command import (
     ResourceAttachmentSpec,
 )
-from devops_platform.infra.composition.application_bindings import (
+from devops_platform.infra.persistence.application_bindings import (
     SQLAlchemyApplicationDatabaseBindings,
 )
 from devops_platform.infra.persistence.models.delivery import ApplicationRow
@@ -35,6 +34,7 @@ from devops_platform.infra.providers.application_runtime import (
     managed_resource_container_name,
 )
 from devops_platform.infra.security.credentials import FernetResourceCredentialCipher
+from devops_platform.infra.workers.application_resources import LedgerApplicationResources
 from shared.authorization.models import AuthorizationDecision
 
 pytestmark = pytest.mark.postgres

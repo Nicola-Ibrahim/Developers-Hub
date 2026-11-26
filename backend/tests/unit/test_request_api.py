@@ -43,6 +43,9 @@ from devops_platform.application.resource_management.submit_database_request.com
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import PlatformRequestError
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
+from identity.application.authentication.authenticate_session.handler import (
+    AuthenticateSessionHandler,
+)
 from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
 from identity.application.interfaces.dispatch import IdentityModule
 from identity.application.interfaces.session_tokens import SessionTokenVerifier
@@ -183,7 +186,11 @@ class FakePlatformQueries:
 class FakeIdentityModule:
     async def query(self, query):
         if isinstance(query, AuthenticateSessionQuery):
-            assert query.project_id is None
+            if query.project_id is not None:
+                return await AuthenticateSessionHandler(
+                    ProvisioningSessionRepository(), PassthroughHasher()
+                ).execute(query)
+            assert query.csrf_token is None
             return SessionPrincipal(
                 OWNER_ID,
                 "demo-user",
@@ -208,6 +215,35 @@ class FakeIdentityModule:
             "developer",
             frozenset(("catalog:read", "resources:read", "resources:write")),
         )
+
+
+class ProvisioningSessionRepository:
+    async def authorize_session_operation(
+        self, token_digest, project_id, now, *, lock_for_mutation
+    ):
+        assert token_digest == "private-session"
+        assert project_id == PROJECT_ID
+        assert lock_for_mutation
+        return SessionPrincipal(
+            OWNER_ID,
+            "demo-user",
+            uuid4(),
+            PROJECT_ID,
+            "first",
+            "developer",
+            ("resources:write",),
+            (MembershipDetails(PROJECT_ID, "first", "developer"),),
+            "",
+        )
+
+    async def validate_csrf(self, token_digest, csrf_digest):
+        assert token_digest == "private-session"
+        return csrf_digest == "valid-csrf"
+
+
+class PassthroughHasher:
+    def digest(self, token):
+        return token
 
 
 class ApiOnlyPlatformProvider(Provider):
@@ -278,6 +314,35 @@ def test_request_resource_returns_accepted_operation_and_forwards_private_inputs
         assert command.project_id == PROJECT_ID
         assert command.environment_id == ENVIRONMENT_ID
         assert forwarded_key == key
+    finally:
+        asyncio.run(container.close())
+
+
+@pytest.mark.parametrize(
+    ("csrf_token", "status"), [("valid-csrf", 202), ("invalid-csrf", 401), (None, 401)]
+)
+def test_browser_provisioning_verifies_csrf_with_identity_before_platform(csrf_token, status):
+    queries = FakePlatformQueries()
+    client, container = _client(queries)
+    headers = {
+        "Origin": "http://localhost:3000",
+        "Idempotency-Key": "feature-branch:42",
+        "X-Project-ID": str(PROJECT_ID),
+    }
+    if csrf_token is not None:
+        headers["X-CSRF-Token"] = csrf_token
+    try:
+        with client:
+            client.cookies.set("devops_session", "private-session")
+            response = client.post("/api/v1/resources", headers=headers, json=_request_payload())
+        assert response.status_code == status
+        if status == 202:
+            _, access, _, _ = queries.calls[0]
+            assert access == AccessContext(
+                OWNER_ID, PROJECT_ID, "developer", frozenset({"resources:write"})
+            )
+        else:
+            assert queries.calls == []
     finally:
         asyncio.run(container.close())
 

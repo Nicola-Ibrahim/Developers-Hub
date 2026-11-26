@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for, dispatch_browser
 
-from composition.container import BackendContainer
+from backend import BackendContainer
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
 from identity.application.api_tokens.personal_token_messages import (
     CreatePersonalTokenCommand,

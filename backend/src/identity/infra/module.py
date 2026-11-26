@@ -36,6 +36,7 @@ from identity.application.authentication.login.handler import LoginHandler
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
 from identity.application.interfaces.dispatch import ActionPrecondition
+from identity.application.interfaces.dispatch import IdentityModule as IdentityModuleContract
 from identity.application.interfaces.security import TokenHasher
 from identity.application.profile.handlers import (
     ReadProfileHandler,
@@ -101,7 +102,7 @@ IDENTITY_HANDLER_REGISTRY = HandlerRegistry(
 IDENTITY_REQUEST_MESSAGES = (LoginCommand, ChangePasswordCommand, AuthenticateApiTokenQuery)
 
 
-class IdentityModule:
+class IdentityModule(IdentityModuleContract):
     """Route public Identity messages and secure browser operations internally."""
 
     def __init__(self, container: AsyncContainer, credentials: RequestCredentials) -> None:
@@ -130,7 +131,9 @@ class IdentityModule:
             return cast(ResultT, await self._mediator.query(query))
         if isinstance(query, AuthenticateSessionQuery):
             identity = self._session_credentials()
-            if query.session_token != identity.session_token:
+            if query.session_token != identity.session_token or (
+                query.csrf_token is not None and query.csrf_token != identity.csrf_token
+            ):
                 raise SessionAuthenticationRejected()
             return cast(
                 ResultT, await self._dispatch_action(lambda mediator: mediator.query(query))

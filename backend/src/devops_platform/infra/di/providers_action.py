@@ -39,7 +39,7 @@ from devops_platform.application.resource_management.submit_database_request.han
 from devops_platform.application.software_delivery.handle_preview_webhook.handler import (
     ProcessGithubPreviewWebhookHandler,
 )
-from devops_platform.infra.composition.module import (
+from devops_platform.infra.handlers import (
     PLATFORM_HANDLER_REGISTRY,
 )
 from devops_platform.infra.persistence.repositories.delivery import (

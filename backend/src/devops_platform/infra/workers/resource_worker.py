@@ -5,8 +5,9 @@ import asyncio
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from backend import BackendRuntime
 from devops_platform.application.workers.resource_operations.handler import (
     ResourceWorkerHandler,
 )
@@ -16,8 +17,7 @@ from devops_platform.infra.persistence.repositories.worker_queue import (
 )
 from devops_platform.infra.providers.docker_postgres import DockerPostgresProvider
 from devops_platform.infra.security.credentials import FernetResourceCredentialCipher
-from shared.infra.persistence.database import create_async_database_engine
-from shared.infra.readiness import SqlAlchemyReadinessProbe
+from shared.application.interfaces.readiness import ReadinessProbe
 from shared.infra.settings import Settings
 
 
@@ -30,21 +30,15 @@ async def run_worker(config: Settings, once: bool = False) -> None:
         raise ValueError(
             "Worker requires an enabled target, stable installation and credential key"
         )
-    engine = create_async_database_engine(
-        config.database_url.get_secret_value(),
-        config.database_connect_timeout,
-        pool_size=config.database_pool_size,
-        max_overflow=config.database_max_overflow,
-        pool_timeout=config.database_pool_timeout,
-        pool_recycle=config.database_pool_recycle_seconds,
-    )
+    runtime = BackendRuntime(config, process="worker")
     try:
-        from shared.infra.settings import SCHEMA_REVISION
-
-        if await SqlAlchemyReadinessProbe(engine, SCHEMA_REVISION).inspect() != "ready":
+        await runtime.start()
+        if await (await runtime.container.get(ReadinessProbe)).inspect() != "ready":
             raise ValueError("Worker schema is not ready")
+        engine = await runtime.container.get(AsyncEngine)
+        sessions = await runtime.container.get(async_sessionmaker[AsyncSession])
         queue = SqlAlchemyProvisioningQueue(
-            async_sessionmaker(engine, expire_on_commit=False),
+            sessions,
             config.installation_id,
             FernetResourceCredentialCipher(
                 config.resource_key.get_secret_value(), config.resource_key_id
@@ -80,7 +74,7 @@ async def run_worker(config: Settings, once: bool = False) -> None:
                     raise
                 await asyncio.sleep(2)
     finally:
-        await engine.dispose()
+        await runtime.close()
 
 
 def main() -> None:

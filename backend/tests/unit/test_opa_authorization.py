@@ -11,17 +11,17 @@ import pytest
 from dishka import Scope
 from dishka.exceptions import NoFactoryError
 
-from composition.container import BackendContainer
-from composition.integrations.platform_authorization import DeveloperPlatformModule
+from backend import BackendContainer
+from devops_platform.application.projects.list_projects.query import ReadProjects
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import CatalogForbidden, PlatformRequestError
-from devops_platform.infra.composition.module import PLATFORM_HANDLER_REGISTRY
+from devops_platform.infra.handlers import PLATFORM_HANDLER_REGISTRY
+from devops_platform.infra.module import DeveloperPlatformModule
 from identity.application.interfaces.security import TokenHasher
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
-from identity.domain.interfaces.project_access import IdentityProjectAccess
 from identity.domain.interfaces.session_repository import SessionRepository
 from identity.domain.records import ApiTokenStatus, MembershipDetails, SessionPrincipal
-from identity.infra.composition.module import IDENTITY_HANDLER_REGISTRY, IdentityModule
+from identity.infra.module import IDENTITY_HANDLER_REGISTRY, IdentityModule
 from shared.authorization.credentials import RequestCredentials, SessionCredentials
 from shared.authorization.dispatch import operation_id, require_authorized
 from shared.authorization.interfaces import (
@@ -164,16 +164,17 @@ def test_registered_operations_have_unique_ids_and_explicit_policy_coverage():
 
 
 @pytest.mark.parametrize(
-    ("registry", "message_type"),
+    ("registry", "message_type", "empty_projects"),
     [
-        pytest.param(registry, message, id=message.__name__)
+        pytest.param(registry, message, False, id=message.__name__)
         for registry, message in REGISTERED_OPERATIONS
         if message.__name__ not in EXEMPT_OPERATIONS
-    ],
+    ]
+    + [pytest.param(PLATFORM_HANDLER_REGISTRY, ReadProjects, True, id="ReadProjects-empty")],
 )
 @pytest.mark.parametrize("outcome", ["deny", "unavailable", "invalid"])
 def test_all_protected_operations_stop_at_the_policy_boundary(
-    registry, message_type, outcome, monkeypatch
+    registry, message_type, empty_projects, outcome, monkeypatch
 ):
     actor_id, project_id, object_id = uuid4(), uuid4(), uuid4()
     scopes = frozenset({"catalog:read", "resources:read", "resources:write", "connections:read"})
@@ -191,7 +192,8 @@ def test_all_protected_operations_stop_at_the_policy_boundary(
     )
     inputs = {
         "access": access,
-        "accesses": (access,),
+        "accesses": () if empty_projects else (access,),
+        "user_id": actor_id if message_type is ReadProjects else object_id,
         "actor_id": actor_id,
         "session_token": "session",
         "project_id": project_id,
@@ -211,6 +213,9 @@ def test_all_protected_operations_stop_at_the_policy_boundary(
     class Decisions:
         async def evaluate(self, facts):
             calls.append(facts.action)
+            if empty_projects:
+                assert facts.subject_id == actor_id
+                assert facts.project_id is None
             if outcome == "unavailable":
                 raise AuthorizationUnavailable()
             if outcome == "invalid":
@@ -258,7 +263,6 @@ def test_all_protected_operations_stop_at_the_policy_boundary(
                 SqlAlchemyUnitOfWork,
                 SessionRepository,
                 ApiTokenRepository,
-                IdentityProjectAccess,
             ):
                 return self
             if dependency.__name__ == "ChangePasswordHandler":
@@ -270,9 +274,6 @@ def test_all_protected_operations_stop_at_the_policy_boundary(
     async def check_password_write_guard(_command, precondition):
         await precondition(fixtures, None)
         pytest.fail("Reached password mutation without authorization")
-
-    async def authenticate_platform(*_args):
-        return access
 
     fixtures = BoundaryFixtures()
     fixtures.session = fixtures
@@ -288,11 +289,15 @@ def test_all_protected_operations_stop_at_the_policy_boundary(
         dispatch = identity.execute if isinstance(message, Command) else identity.query
         operation = dispatch(message)
     else:
+
+        async def membership_roles(*_args, **_kwargs):
+            return {project_id: access.role}
+
         monkeypatch.setattr(
-            "composition.integrations.platform_authorization.authenticate_platform_access",
-            authenticate_platform,
+            "devops_platform.infra.module.project_roles_for_operation",
+            membership_roles,
         )
-        host = DeveloperPlatformModule(fixtures, RequestCredentials(), object(), decisions)
+        host = DeveloperPlatformModule(fixtures, decisions)
         dispatch = host.execute if isinstance(message, Command) else host.query
         operation = dispatch(message)
 
@@ -352,6 +357,6 @@ def test_platform_rejects_unknown_operations_before_opening_an_action_scope():
         access: AccessContext
 
     access = AccessContext(uuid4(), uuid4(), "developer", frozenset())
-    host = DeveloperPlatformModule(object(), RequestCredentials(), object(), object())
+    host = DeveloperPlatformModule(object(), object())
     with pytest.raises(TypeError, match="[Uu]n(registered|supported)"):
         asyncio.run(host.execute(UnknownCommand(access)))

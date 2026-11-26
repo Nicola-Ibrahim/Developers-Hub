@@ -13,6 +13,7 @@ from uuid import UUID
 from devops_platform.application.interfaces.software_delivery import (
     ApplicationDeliveryFailure,
     ApprovedImageCatalog,
+    RepositoryProvisioner,
     RequestFingerprint,
     TemplateCatalog,
     WebhookSignatureVerifier,
@@ -23,7 +24,7 @@ from devops_platform.application.software_delivery.shared.models import (
 )
 
 
-class GitHubRepositoryAdapter:
+class GitHubRepositoryAdapter(RepositoryProvisioner):
     """Optional GitHub adapter. It has no network capability until configured."""
 
     def __init__(

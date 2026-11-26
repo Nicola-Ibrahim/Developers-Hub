@@ -3,35 +3,26 @@
 import argparse
 import asyncio
 
-from composition.container import BackendContainer
+from backend import BackendRuntime
 from devops_platform.infra.workers.application_host import (
     ApplicationDeliveryHost,
     run_application_worker,
 )
-from shared.infra.persistence.database import create_async_database_engine
-from shared.infra.readiness import SqlAlchemyReadinessProbe
-from shared.infra.settings import SCHEMA_REVISION, Settings
+from shared.application.interfaces.readiness import ReadinessProbe
+from shared.infra.settings import Settings
 
 
 async def run(config: Settings, once: bool = False) -> None:
-    engine = create_async_database_engine(
-        config.database_url.get_secret_value(),
-        config.database_connect_timeout,
-        pool_size=config.database_pool_size,
-        max_overflow=config.database_max_overflow,
-        pool_timeout=config.database_pool_timeout,
-        pool_recycle=config.database_pool_recycle_seconds,
-    )
-    container = BackendContainer(config, engine=engine).worker()
+    runtime = BackendRuntime(config, process="worker")
     try:
-        if await SqlAlchemyReadinessProbe(engine, SCHEMA_REVISION).inspect() != "ready":
+        await runtime.start()
+        if await (await runtime.container.get(ReadinessProbe)).inspect() != "ready":
             raise ValueError("Application delivery schema is not ready")
-        async with container() as scope:
+        async with runtime.container() as scope:
             service = await scope.get(ApplicationDeliveryHost)
             await run_application_worker(service, once=once)
     finally:
-        await container.close()
-        await engine.dispose()
+        await runtime.close()
 
 
 def main() -> None:

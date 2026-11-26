@@ -9,7 +9,6 @@ class SessionCredentials:
     session_token: str | None = field(repr=False)
     project_id: UUID | None = None
     csrf_token: str | None = field(default=None, repr=False)
-    origin: str | None = None
     mutate: bool = False
 
 
