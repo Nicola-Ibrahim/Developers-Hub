@@ -13,7 +13,11 @@ decision := {"allow": allowed, "policy_revision": "authorization-v1", "reason": 
 	allowed := true in results
 }
 
-reason := "ownership" if {
+reason := "not_found" if {
+	data.devops.resources.target_not_found
+} else := "not_found" if {
+	data.devops.applications.target_not_found
+} else := "ownership" if {
 	data.devops.resources.ownership_denied
 } else := "ownership" if {
 	data.devops.applications.ownership_denied

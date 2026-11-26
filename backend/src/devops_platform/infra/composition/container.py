@@ -2,16 +2,25 @@
 
 from dishka import Provider
 
+from devops_platform import application
+from devops_platform.application.project_access.bootstrap_first_admin.command import (
+    BootstrapFirstAdmin,
+)
+from devops_platform.infra.composition.module import PLATFORM_HANDLER_REGISTRY
 from devops_platform.infra.composition.providers_action import PlatformActionProvider
 from devops_platform.infra.composition.providers_delivery import ApplicationDeliveryProvider
 from devops_platform.infra.composition.providers_platform import PlatformProvider
 from devops_platform.infra.composition.providers_worker import ApplicationWorkerProvider
+from shared.infra.dispatch import validate_context_messages
 
 
 class DeveloperPlatformContainer:
     """Keep Platform DI registrations with the bounded context that owns them."""
 
     def providers(self) -> tuple[Provider, ...]:
+        validate_context_messages(
+            PLATFORM_HANDLER_REGISTRY, application, internal=(BootstrapFirstAdmin,)
+        )
         return (
             PlatformProvider(),
             PlatformActionProvider(component="platform_action"),

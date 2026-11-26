@@ -1,25 +1,18 @@
 """Cookie and project-header parsing for internal browser authentication."""
 
-from dataclasses import dataclass, field
 from uuid import UUID
 
 from fastapi import Request
 
 from api.core.errors import APIError
 from identity.application.interfaces.session_tokens import SessionTokenVerifier
+from shared.authorization.credentials import SessionCredentials
+
+BrowserCredentials = SessionCredentials
 
 SESSION_COOKIE = "devops_session"
 PROJECT_HEADER = "X-Project-ID"
 CSRF_HEADER = "X-CSRF-Token"
-
-
-@dataclass(frozen=True)
-class BrowserCredentials:
-    session_token: str | None = field(repr=False)
-    project_id: UUID | None = None
-    csrf_token: str | None = field(default=None, repr=False)
-    origin: str | None = None
-    mutate: bool = False
 
 
 def browser_credentials(request: Request) -> BrowserCredentials:

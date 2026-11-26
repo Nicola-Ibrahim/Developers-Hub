@@ -88,7 +88,9 @@ def test_http_ledger_authentication_and_commit_precede_success(outcome, monkeypa
         events.append("authenticate")
         return AccessContext(user, project, "developer", frozenset({"resources:write"}))
 
-    monkeypatch.setattr("api.platform.module.authenticate_platform_access", authenticate)
+    monkeypatch.setattr(
+        "composition.integrations.platform_authorization.authenticate_platform_access", authenticate
+    )
 
     class Requester:
         async def execute(self, message):

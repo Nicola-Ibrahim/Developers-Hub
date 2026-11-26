@@ -2,11 +2,13 @@
 
 import asyncio
 
-from dishka import AsyncContainer, Provider, Scope, from_context, make_async_container
+from dishka import AsyncContainer, Provider, Scope, from_context, make_async_container, provide
 from dishka.integrations.fastapi import FastapiProvider
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from api.composition.providers import ApiCompositionProvider
+from api.health.metrics import OperationalMetrics
+from api.health.metrics_adapter import DatabaseOperationalMetrics
+from api.settings.config import BrowserCookiePolicy
 from composition.integrations.providers import (
     CrossContextIntegrationProvider,
     IdentityActionIntegrationProvider,
@@ -16,6 +18,7 @@ from devops_platform.authorization import ALL_SCOPES
 from devops_platform.infra.composition.container import DeveloperPlatformContainer
 from identity.infra.composition.container import IdentityContainer
 from identity.infra.composition.providers import IdentityTokenScopePolicy
+from shared.authorization.credentials import RequestCredentials
 from shared.infra.authorization.provider import AuthorizationProvider
 from shared.infra.providers import DatabaseProvider, ExternalDatabase
 from shared.infra.settings import Settings
@@ -25,6 +28,21 @@ class RuntimeContext(Provider):
     settings = from_context(Settings, scope=Scope.APP)
     database = from_context(ExternalDatabase, scope=Scope.APP)
     identity_token_scopes = from_context(IdentityTokenScopePolicy, scope=Scope.APP)
+
+    @provide(scope=Scope.REQUEST)
+    def request_credentials(self) -> RequestCredentials:
+        return RequestCredentials()
+
+
+class HttpProvider(Provider):
+    metrics = provide(DatabaseOperationalMetrics, provides=OperationalMetrics, scope=Scope.APP)
+
+    @provide(scope=Scope.APP)
+    def browser_cookie_policy(self, settings: Settings) -> BrowserCookiePolicy:
+        return BrowserCookiePolicy(
+            secure=settings.cookie_secure,
+            allowed_origins=settings.browser_allowed_origins,
+        )
 
 
 class BackendContainer:
@@ -49,14 +67,14 @@ class BackendContainer:
         self._platform = DeveloperPlatformContainer()
 
     def api(self) -> AsyncContainer:
-        return self._compose(ApiCompositionProvider(), FastapiProvider())
+        return self._compose(HttpProvider(), FastapiProvider())
 
     def worker(self) -> AsyncContainer:
         return self._compose(*self._platform.worker_providers())
 
     def combined(self) -> AsyncContainer:
         return self._compose(
-            ApiCompositionProvider(),
+            HttpProvider(),
             FastapiProvider(),
             *self._platform.worker_providers(),
         )

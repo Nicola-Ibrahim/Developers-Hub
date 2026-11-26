@@ -1,15 +1,14 @@
 """Project membership administration endpoints."""
 
-from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Depends, Header, Request, Response
+from fastapi import APIRouter, Header, Request, Response
 
-from api.core.security.request_identity import browser_request_identity
-from api.identity.authentication.credentials import CSRF_HEADER, browser_credentials
+from api.core.errors import APIError
+from api.identity.authentication.credentials import CSRF_HEADER
 from api.platform.projects.schemas import MembershipBody
 from devops_platform.application.interfaces.module import DeveloperPlatformModule
 from devops_platform.application.project_access.list_project_members.query import ListProjectMembers
@@ -19,21 +18,12 @@ from devops_platform.application.project_access.manage_project_membership.comman
 from devops_platform.application.shared.dto import AccessContext
 from identity.domain.records import SessionPrincipal
 
-router = APIRouter(dependencies=[Depends(browser_request_identity)])
+router = APIRouter()
 
 
-async def project_access(project_id: UUID, request: Request) -> AccessContext:
-    credentials = browser_credentials(request)
-    if not credentials.session_token:
-        from api.core.errors import APIError
-
-        raise APIError(401, "authentication_required", "Browser session is required")
-    identity = replace(credentials, project_id=project_id)
-    request.state.request_identity = identity
+def _project_access(project_id: UUID, request: Request) -> AccessContext:
     principal = cast(SessionPrincipal, request.state.identity_principal)
     if principal.role not in {"developer", "admin"}:
-        from api.core.errors import APIError
-
         raise APIError(401, "authentication_required", "Project membership is required")
     access = AccessContext(
         principal.user_id,
@@ -52,7 +42,7 @@ async def list_project_members(
     response: Response,
     module: FromDishka[DeveloperPlatformModule],
 ) -> list[dict[str, object]]:
-    access = await project_access(project_id, request)
+    access = _project_access(project_id, request)
     response.headers["Cache-Control"] = "no-store"
     members = await module.query(ListProjectMembers(access, project_id))
     return [
@@ -71,7 +61,7 @@ async def set_project_member(
     module: FromDishka[DeveloperPlatformModule],
     _csrf: Annotated[str, Header(alias=CSRF_HEADER)],
 ) -> Response:
-    access = await project_access(project_id, request)
+    access = _project_access(project_id, request)
     await module.execute(
         ManageProjectMembership(access, project_id, user_id, body.role, datetime.now(UTC))
     )
@@ -87,7 +77,7 @@ async def remove_project_member(
     module: FromDishka[DeveloperPlatformModule],
     _csrf: Annotated[str, Header(alias=CSRF_HEADER)],
 ) -> Response:
-    access = await project_access(project_id, request)
+    access = _project_access(project_id, request)
     await module.execute(
         ManageProjectMembership(access, project_id, user_id, None, datetime.now(UTC))
     )

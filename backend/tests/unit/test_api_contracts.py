@@ -24,6 +24,7 @@ from identity.application.interfaces.session_tokens import SessionTokenVerifier
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
 from identity.infra.security.opaque_secrets import token_digest
 from shared.application.interfaces.readiness import ReadinessProbe
+from shared.authorization.credentials import RequestCredentials
 from shared.authorization.interfaces import AuthorizationDecisionPort
 from shared.authorization.models import AuthorizationDecision
 from shared.infra.settings import Settings
@@ -273,6 +274,10 @@ def test_http_transport_works_with_fake_application_ports():
             return await ReadCatalogQueryHandler().execute(message)
 
     class FakeCapabilities(Provider):
+        @provide(scope=Scope.REQUEST)
+        def credentials(self) -> RequestCredentials:
+            return RequestCredentials()
+
         @provide(scope=Scope.REQUEST)
         def authenticate(self) -> IdentityModule:
             return FakeIdentityQuery()

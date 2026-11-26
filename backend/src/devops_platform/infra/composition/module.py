@@ -1,8 +1,5 @@
 """Explicit platform message bindings; use-case adapters stay in this context."""
 
-from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
-
 from devops_platform.application.applications.create_application.command import (
     CreateApplication,
 )
@@ -131,10 +128,7 @@ from devops_platform.application.software_delivery.retry_delivery_step.command i
 from devops_platform.application.software_delivery.retry_delivery_step.handler import (
     RetryDeliveryStepHandler,
 )
-from shared.dispatch import Command, HandlerRegistry, ModuleDispatcher, Query
-
-ResultT = TypeVar("ResultT")
-
+from shared.dispatch import HandlerRegistry
 
 PLATFORM_HANDLER_REGISTRY = HandlerRegistry(
     commands=(
@@ -165,16 +159,3 @@ PLATFORM_HANDLER_REGISTRY = HandlerRegistry(
         (ListProjectMembers, ListProjectMembersHandler),
     ),
 )
-
-
-class DeveloperPlatformModuleDispatcher(ModuleDispatcher):
-    """Internal handler dispatcher; only authenticated hosts expose the module contract."""
-
-    def __init__(self, resolve_handler: Callable[[type[Any]], Awaitable[Any]]) -> None:
-        super().__init__(PLATFORM_HANDLER_REGISTRY, resolve_handler)
-
-    async def execute(self, command: Command[ResultT]) -> ResultT:
-        return await super().execute(command)
-
-    async def query(self, query: Query[ResultT]) -> ResultT:
-        return await super().query(query)

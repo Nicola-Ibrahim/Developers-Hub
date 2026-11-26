@@ -7,22 +7,18 @@ import pytest
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 from test_browser_identity_postgres import ORIGIN, PASSWORD, PEPPER, seed_user
-from test_foundation_postgres import async_engine_for, mutation_request
+from test_foundation_postgres import async_engine_for, dispatch_browser
 
-from api.composition.identity_preconditions import (
-    browser_read_precondition,
-    browser_write_precondition,
-)
-from api.core.errors import APIError
 from composition.container import BackendContainer
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.interfaces.dispatch import IdentityModule
-from identity.application.interfaces.security import TokenHasher
 from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery
 from identity.application.profile.update_profile import UpdateProfileCommand
+from identity.domain.session_errors import SessionAuthenticationRejected
 from identity.infra.persistence.models.activity import IdentityActivityRow
 from identity.infra.persistence.models.session import SessionRow
 from identity.infra.persistence.models.user import InternalUserRow
+from shared.authorization.credentials import RequestCredentials, SessionCredentials
 from shared.infra.settings import Settings
 
 pytestmark = pytest.mark.postgres
@@ -46,29 +42,23 @@ def test_profile_and_security_history_are_user_owned_and_csrf_failure_rolls_back
         try:
             async with container() as scope:
                 identity = await scope.get(IdentityModule)
-                hasher = await scope.get(TokenHasher)
+                credentials = await scope.get(RequestCredentials)
                 first_login = await identity.execute(LoginCommand(first_user_name, PASSWORD, None))
                 second_login = await identity.execute(
                     LoginCommand(second_user_name, PASSWORD, None)
                 )
 
-                first_profile = await identity.query_with_precondition(
+                first_profile = await dispatch_browser(
+                    identity.query,
+                    credentials,
+                    SessionCredentials(first_login.session_token),
                     ProfileQuery(first_user_id),
-                    browser_read_precondition(
-                        mutation_request(first_login.session_token, first_login.csrf_token, ORIGIN),
-                        first_user_id,
-                        hasher,
-                    ),
                 )
-                second_profile = await identity.query_with_precondition(
+                second_profile = await dispatch_browser(
+                    identity.query,
+                    credentials,
+                    SessionCredentials(second_login.session_token),
                     ProfileQuery(second_user_id),
-                    browser_read_precondition(
-                        mutation_request(
-                            second_login.session_token, second_login.csrf_token, ORIGIN
-                        ),
-                        second_user_id,
-                        hasher,
-                    ),
                 )
                 assert first_profile.user_id == first_user_id
                 assert first_profile.user_name == first_user_name
@@ -77,44 +67,34 @@ def test_profile_and_security_history_are_user_owned_and_csrf_failure_rolls_back
                 assert second_profile.user_name == second_user_name
                 assert second_profile.display_name is None
 
-                changed = await identity.execute_with_precondition(
-                    UpdateProfileCommand(first_user_id, "First User Display"),
-                    browser_write_precondition(
-                        mutation_request(first_login.session_token, first_login.csrf_token, ORIGIN),
-                        first_user_id,
-                        hasher,
+                changed = await dispatch_browser(
+                    identity.execute,
+                    credentials,
+                    SessionCredentials(
+                        first_login.session_token, csrf_token=first_login.csrf_token
                     ),
+                    UpdateProfileCommand(first_user_id, "First User Display"),
                 )
                 assert changed.display_name == "First User Display"
-                second_profile_after_change = await identity.query_with_precondition(
+                second_profile_after_change = await dispatch_browser(
+                    identity.query,
+                    credentials,
+                    SessionCredentials(second_login.session_token),
                     ProfileQuery(second_user_id),
-                    browser_read_precondition(
-                        mutation_request(
-                            second_login.session_token, second_login.csrf_token, ORIGIN
-                        ),
-                        second_user_id,
-                        hasher,
-                    ),
                 )
                 assert second_profile_after_change.display_name is None
 
-                first_history = await identity.query_with_precondition(
+                first_history = await dispatch_browser(
+                    identity.query,
+                    credentials,
+                    SessionCredentials(first_login.session_token),
                     SecurityHistoryQuery(first_user_id),
-                    browser_read_precondition(
-                        mutation_request(first_login.session_token, first_login.csrf_token, ORIGIN),
-                        first_user_id,
-                        hasher,
-                    ),
                 )
-                second_history = await identity.query_with_precondition(
+                second_history = await dispatch_browser(
+                    identity.query,
+                    credentials,
+                    SessionCredentials(second_login.session_token),
                     SecurityHistoryQuery(second_user_id),
-                    browser_read_precondition(
-                        mutation_request(
-                            second_login.session_token, second_login.csrf_token, ORIGIN
-                        ),
-                        second_user_id,
-                        hasher,
-                    ),
                 )
                 assert any(
                     item.action == "profile_updated" and item.outcome == "succeeded"
@@ -125,22 +105,16 @@ def test_profile_and_security_history_are_user_owned_and_csrf_failure_rolls_back
                     item.id for item in second_history
                 )
 
-                with pytest.raises(APIError) as rejected:
-                    await identity.execute_with_precondition(
+                with pytest.raises(SessionAuthenticationRejected):
+                    await dispatch_browser(
+                        identity.execute,
+                        credentials,
+                        SessionCredentials(first_login.session_token, csrf_token="invalid-csrf"),
                         UpdateProfileCommand(first_user_id, "Must Roll Back"),
-                        browser_write_precondition(
-                            mutation_request(first_login.session_token, "invalid-csrf", ORIGIN),
-                            first_user_id,
-                            hasher,
-                        ),
                     )
-                assert rejected.value.status == 401
-                assert rejected.value.code == "authentication_rejected"
 
-                guard = browser_write_precondition(
-                    mutation_request(first_login.session_token, first_login.csrf_token, ORIGIN),
-                    first_user_id,
-                    hasher,
+                session = SessionCredentials(
+                    first_login.session_token, csrf_token=first_login.csrf_token
                 )
                 async with database.begin() as connection:
                     await connection.execute(
@@ -148,29 +122,26 @@ def test_profile_and_security_history_are_user_owned_and_csrf_failure_rolls_back
                         .where(SessionRow.id == first_login.principal.session_id)
                         .values(revoked_at=datetime.now(UTC))
                     )
-                with pytest.raises(APIError) as revoked:
-                    await identity.execute_with_precondition(
-                        UpdateProfileCommand(first_user_id, "Must Stay Revoked"), guard
+                with pytest.raises(SessionAuthenticationRejected):
+                    await dispatch_browser(
+                        identity.execute,
+                        credentials,
+                        session,
+                        UpdateProfileCommand(first_user_id, "Must Stay Revoked"),
                     )
-                assert revoked.value.status == 401
-                assert revoked.value.code == "authentication_rejected"
 
                 fresh_login = await identity.execute(LoginCommand(first_user_name, PASSWORD, None))
-                persisted = await identity.query_with_precondition(
+                persisted = await dispatch_browser(
+                    identity.query,
+                    credentials,
+                    SessionCredentials(fresh_login.session_token),
                     ProfileQuery(first_user_id),
-                    browser_read_precondition(
-                        mutation_request(fresh_login.session_token, fresh_login.csrf_token, ORIGIN),
-                        first_user_id,
-                        hasher,
-                    ),
                 )
-                after_rejection = await identity.query_with_precondition(
+                after_rejection = await dispatch_browser(
+                    identity.query,
+                    credentials,
+                    SessionCredentials(fresh_login.session_token),
                     SecurityHistoryQuery(first_user_id),
-                    browser_read_precondition(
-                        mutation_request(fresh_login.session_token, fresh_login.csrf_token, ORIGIN),
-                        first_user_id,
-                        hasher,
-                    ),
                 )
                 assert persisted.display_name == "First User Display"
                 assert sum(item.action == "profile_updated" for item in after_rejection) == 1

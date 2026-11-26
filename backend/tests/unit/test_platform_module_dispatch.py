@@ -2,6 +2,7 @@
 
 import asyncio
 
+from dishka import Scope
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from composition.container import BackendContainer
@@ -41,8 +42,9 @@ def test_every_platform_handler_resolves_in_operation_scope_without_database_io(
     async def verify() -> None:
         container = BackendContainer(config).combined()
         try:
-            async with container() as scope:
-                repository = await scope.get(ResourceRepository)
+            async with container() as request_scope, request_scope(scope=Scope.ACTION) as scope:
+                component = "platform_action"
+                repository = await scope.get(ResourceRepository, component=component)
                 for handler in (
                     RequestTemporaryDatabaseHandler,
                     RenewDatabaseLeaseHandler,
@@ -50,14 +52,14 @@ def test_every_platform_handler_resolves_in_operation_scope_without_database_io(
                     ListResourceActivityQueryHandler,
                     ReadResourcesHandler,
                 ):
-                    assert (await scope.get(handler)).repository is repository
+                    assert (await scope.get(handler, component=component)).repository is repository
                 handlers = (
                     *PLATFORM_HANDLER_REGISTRY.commands.values(),
                     *PLATFORM_HANDLER_REGISTRY.queries.values(),
                 )
                 for handler in handlers:
-                    assert isinstance(await scope.get(handler), handler)
-                await (await scope.get(AsyncSession)).close()
+                    assert isinstance(await scope.get(handler, component=component), handler)
+                await (await scope.get(AsyncSession, component=component)).close()
         finally:
             await container.close()
 

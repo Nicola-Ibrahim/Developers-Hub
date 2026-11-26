@@ -8,18 +8,6 @@ from typing import Annotated
 from dishka import FromComponent, Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from devops_platform.application.applications.create_application.handler import (
-    CreateApplicationHandler,
-)
-from devops_platform.application.applications.get_application.handler import (
-    ReadApplicationHandler,
-)
-from devops_platform.application.applications.list_applications.handler import (
-    ReadApplicationsHandler,
-)
-from devops_platform.application.applications.read_templates.handler import (
-    ReadTemplatesHandler,
-)
 from devops_platform.application.interfaces.applications import (
     ApplicationCreationRepository,
     ApplicationReadRepository,
@@ -40,58 +28,19 @@ from devops_platform.application.interfaces.software_delivery import (
     TemplateCatalog,
     WebhookSignatureVerifier,
 )
-from devops_platform.application.project_access.list_project_members.handler import (
-    ListProjectMembersHandler,
-)
-from devops_platform.application.project_access.manage_project_membership.handler import (
-    ManageProjectMembershipHandler,
-)
-from devops_platform.application.projects.get_project.handler import ReadProjectHandler
-from devops_platform.application.projects.list_projects.handler import ReadProjectsHandler
 from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
 from devops_platform.application.resource_management.catalog.handler import ReadCatalogQueryHandler
-from devops_platform.application.resource_management.delete_database.handler import (
-    DeleteTemporaryDatabaseHandler,
-)
-from devops_platform.application.resource_management.get_operation.handler import (
-    ReadOperationHandler,
-)
-from devops_platform.application.resource_management.get_resource.handler import ReadResourceHandler
-from devops_platform.application.resource_management.list_resources.handler import (
-    ReadResourcesHandler,
-)
-from devops_platform.application.resource_management.read_activity.handler import (
-    ListResourceActivityQueryHandler,
-)
-from devops_platform.application.resource_management.read_connection.handler import (
-    GetDatabaseConnectionQueryHandler,
-)
-from devops_platform.application.resource_management.renew_lease.handler import (
-    RenewDatabaseLeaseHandler,
-)
 from devops_platform.application.resource_management.submit_database_request.command import (
     DatabaseRequest,
 )
 from devops_platform.application.resource_management.submit_database_request.handler import (
     RequestTemporaryDatabaseHandler,
 )
-from devops_platform.application.software_delivery.attach_database.handler import (
-    AttachApplicationResourceHandler,
-)
-from devops_platform.application.software_delivery.create_local_preview.handler import (
-    CreateLocalPreviewHandler,
-)
-from devops_platform.application.software_delivery.deploy_application.handler import (
-    DeployApplicationHandler,
-)
 from devops_platform.application.software_delivery.handle_preview_webhook.handler import (
     ProcessGithubPreviewWebhookHandler,
 )
-from devops_platform.application.software_delivery.read_deployment_history.handler import (
-    ReadDeploymentHistoryHandler,
-)
-from devops_platform.application.software_delivery.retry_delivery_step.handler import (
-    RetryDeliveryStepHandler,
+from devops_platform.infra.composition.module import (
+    PLATFORM_HANDLER_REGISTRY,
 )
 from devops_platform.infra.persistence.repositories.delivery import (
     SQLAlchemyApplicationDeliveryRepository,
@@ -101,12 +50,26 @@ from devops_platform.infra.persistence.repositories.project_registration import 
 )
 from devops_platform.infra.persistence.repositories.resource import SQLAlchemyResourceRepository
 from devops_platform.infra.security.credentials import FernetResourceCredentialCipher
+from shared.infra.dispatch import register_handlers
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import Settings
 
 
 class PlatformActionProvider(Provider):
     """Create the Platform session and all session-bound adapters per dispatch."""
+
+    def __init__(self, *, component: str) -> None:
+        super().__init__(component=component)
+        register_handlers(
+            self,
+            PLATFORM_HANDLER_REGISTRY,
+            scope=Scope.ACTION,
+            factories={
+                ReadCatalogQueryHandler: self.catalog_handler,
+                RequestTemporaryDatabaseHandler: self.request_handler,
+                ProcessGithubPreviewWebhookHandler: self.process_preview_webhook_handler,
+            },
+        )
 
     @provide(scope=Scope.ACTION)
     def session(
@@ -211,35 +174,9 @@ class PlatformActionProvider(Provider):
             settings.resource_key.get_secret_value(), settings.resource_key_id
         )
 
-    project_handler = provide(ReadProjectHandler, scope=Scope.ACTION)
-    projects_handler = provide(ReadProjectsHandler, scope=Scope.ACTION)
-    resources_handler = provide(ReadResourcesHandler, scope=Scope.ACTION)
-    resource_handler = provide(ReadResourceHandler, scope=Scope.ACTION)
-    operation_handler = provide(ReadOperationHandler, scope=Scope.ACTION)
-    renew_handler = provide(RenewDatabaseLeaseHandler, scope=Scope.ACTION)
-    delete_handler = provide(DeleteTemporaryDatabaseHandler, scope=Scope.ACTION)
-    connection_handler = provide(GetDatabaseConnectionQueryHandler, scope=Scope.ACTION)
-    activity_handler = provide(ListResourceActivityQueryHandler, scope=Scope.ACTION)
-
-    @provide(scope=Scope.ACTION)
     def catalog_handler(self, catalog: ApprovedPostgresCatalog) -> ReadCatalogQueryHandler:
         return ReadCatalogQueryHandler(catalog)
 
-    list_project_members_handler = provide(ListProjectMembersHandler, scope=Scope.ACTION)
-    manage_project_membership_handler = provide(ManageProjectMembershipHandler, scope=Scope.ACTION)
-    read_templates_handler = provide(ReadTemplatesHandler, scope=Scope.ACTION)
-    create_application_handler = provide(CreateApplicationHandler, scope=Scope.ACTION)
-    create_local_preview_handler = provide(CreateLocalPreviewHandler, scope=Scope.ACTION)
-    attach_application_resource_handler = provide(
-        AttachApplicationResourceHandler, scope=Scope.ACTION
-    )
-    deploy_application_handler = provide(DeployApplicationHandler, scope=Scope.ACTION)
-    retry_delivery_step_handler = provide(RetryDeliveryStepHandler, scope=Scope.ACTION)
-    read_applications_handler = provide(ReadApplicationsHandler, scope=Scope.ACTION)
-    read_application_handler = provide(ReadApplicationHandler, scope=Scope.ACTION)
-    read_deployment_history_handler = provide(ReadDeploymentHistoryHandler, scope=Scope.ACTION)
-
-    @provide(scope=Scope.ACTION)
     def request_handler(
         self,
         repository: ResourceRepository,
@@ -256,7 +193,6 @@ class PlatformActionProvider(Provider):
             repository, catalog, fingerprint, settings.installation_id
         )
 
-    @provide(scope=Scope.ACTION)
     def process_preview_webhook_handler(
         self,
         repository: PreviewWebhookRepository,

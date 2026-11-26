@@ -22,6 +22,7 @@ from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.handler import LoginHandler
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
+from identity.application.interfaces.security import TokenHasher
 from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery
 from identity.application.profile.update_profile import UpdateProfileCommand
 from identity.application.sessions.list_sessions.query import ListSessionsQuery
@@ -34,14 +35,16 @@ from identity.application.sessions.select_active_project.command import (
     SelectActiveProjectCommand,
 )
 from identity.domain.aggregates.api_token import ApiTokenAuthenticationDetails
+from identity.domain.interfaces.session_repository import SessionRepository
 from identity.domain.records import SessionPrincipal
 from identity.infra.composition.api_token_transactions import (
     SqlAlchemyApiTokenTransaction,
 )
 from identity.infra.composition.module import (
     IDENTITY_HANDLER_REGISTRY,
-    IdentityModuleDispatcher,
+    IdentityModule,
 )
+from shared.authorization.credentials import RequestCredentials, SessionCredentials
 from shared.authorization.interfaces import (
     AuthorizationDecisionPort,
     AuthorizationDenied,
@@ -89,12 +92,8 @@ def test_identity_registry_rejects_incomplete_or_ambiguous_bindings() -> None:
             commands=[(LoginCommand, LoginHandler)] * 2,
             queries=[],
         )
-    with pytest.raises(RegistrationError, match="required command"):
-        HandlerRegistry(
-            commands=[],
-            queries=[],
-            required_commands=[LoginCommand],
-        )
+    with pytest.raises(RegistrationError, match="required message"):
+        HandlerRegistry(commands=[], queries=[]).require_messages([LoginCommand])
 
 
 def test_identity_dispatch_resolves_only_selected_handler() -> None:
@@ -115,7 +114,7 @@ def test_identity_dispatch_resolves_only_selected_handler() -> None:
         pass
 
     async def run() -> None:
-        dispatcher = IdentityModuleDispatcher(Container())
+        dispatcher = IdentityModule(Container(), RequestCredentials())
         command = LoginCommand("alice", "secret", None)
         assert await dispatcher.execute(command) == "alice"
         assert resolved == [LoginHandler]
@@ -134,6 +133,17 @@ def test_logout_dispatch_resolves_from_fresh_identity_action_scope() -> None:
     events = []
     authorization_calls = []
     principal = SessionPrincipal(uuid4(), "alice", uuid4(), None, None, None, (), (), "csrf")
+    credentials = RequestCredentials(SessionCredentials("token", csrf_token="csrf"))
+
+    class Sessions:
+        async def authorize_session_operation(self, *_args, **_kwargs):
+            return principal
+
+        async def validate_csrf(self, *_args):
+            return True
+
+    class Hasher:
+        digest = staticmethod(str)
 
     class Authorizer:
         async def evaluate(self, request):
@@ -162,10 +172,14 @@ def test_logout_dispatch_resolves_from_fresh_identity_action_scope() -> None:
                         return materialize(result)
 
                 return Unit()
+            if handler is SessionRepository:
+                return Sessions()
             return LogoutActionHandler()
 
     class Container:
         async def get(self, handler: type[object]) -> object:
+            if handler is TokenHasher:
+                return Hasher()
             if handler is AuthorizationDecisionPort:
                 return Authorizer()
             raise AssertionError(f"non-action handler requested: {handler}")
@@ -175,15 +189,9 @@ def test_logout_dispatch_resolves_from_fresh_identity_action_scope() -> None:
             return ActionContainer()
 
     async def run() -> None:
-        dispatcher = IdentityModuleDispatcher(Container())
+        dispatcher = IdentityModule(Container(), credentials)
         for _ in range(2):
-            assert (
-                await dispatcher.execute_with_precondition(
-                    LogoutCommand("token"),
-                    lambda *_args: asyncio.sleep(0, result=principal),
-                )
-                is None
-            )
+            assert await dispatcher.execute(LogoutCommand("token")) is None
 
     asyncio.run(run())
     assert scopes == [Scope.ACTION, Scope.ACTION]
@@ -204,6 +212,18 @@ def test_dispatch_denies_before_handler_and_evaluates_policy_once(unavailable: b
     from identity.domain.interfaces.session_repository import SessionRepository
 
     principal = SessionPrincipal(uuid4(), "alice", uuid4(), None, None, None, (), (), "csrf")
+    credentials = RequestCredentials(SessionCredentials("token", csrf_token="csrf"))
+
+    class Sessions:
+        async def authorize_session_operation(self, *_args, **_kwargs):
+            return principal
+
+        async def validate_csrf(self, *_args):
+            return True
+
+    class Hasher:
+        digest = staticmethod(str)
+
     policy_calls = []
     handler_calls = []
 
@@ -231,7 +251,9 @@ def test_dispatch_denies_before_handler_and_evaluates_policy_once(unavailable: b
                         return materialize(await action())
 
                 return Unit()
-            if handler in (SessionRepository, ApiTokenRepository):
+            if handler is SessionRepository:
+                return Sessions()
+            if handler is ApiTokenRepository:
                 return object()
             if handler is LogoutHandler:
 
@@ -244,6 +266,8 @@ def test_dispatch_denies_before_handler_and_evaluates_policy_once(unavailable: b
 
     class Container:
         async def get(self, dependency):
+            if dependency is TokenHasher:
+                return Hasher()
             assert dependency is AuthorizationDecisionPort
             return Policy()
 
@@ -251,17 +275,9 @@ def test_dispatch_denies_before_handler_and_evaluates_policy_once(unavailable: b
             assert scope is Scope.ACTION
             return ActionContainer()
 
-    async def principal_precondition(*_args):
-        return principal
-
-    dispatcher = IdentityModuleDispatcher(Container())
+    dispatcher = IdentityModule(Container(), credentials)
     with pytest.raises(AuthorizationUnavailable if unavailable else AuthorizationDenied):
-        asyncio.run(
-            dispatcher.execute_with_precondition(
-                LogoutCommand("token"),
-                principal_precondition,
-            )
-        )
+        asyncio.run(dispatcher.execute(LogoutCommand("token")))
     assert len(policy_calls) == 1
     assert policy_calls[0].action == (
         "identity.application.authentication.logout.command.LogoutCommand"

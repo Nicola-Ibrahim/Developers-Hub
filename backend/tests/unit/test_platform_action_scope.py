@@ -6,16 +6,16 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from dishka import Provider, Scope, provide
-from fastapi import Request
+from dishka import AsyncContainer, Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from api.platform.module import PlatformRequestModule
 from composition.container import BackendContainer
+from devops_platform.application.interfaces.module import DeveloperPlatformModule
 from devops_platform.application.interfaces.resources import ResourceRepository
 from devops_platform.application.resource_management.get_resource.query import ReadResource
 from devops_platform.application.resource_management.read_models import ResourceDetails
 from devops_platform.application.shared.dto import AccessContext
+from shared.authorization.credentials import RequestCredentials
 from shared.authorization.interfaces import AuthorizationDecisionPort
 from shared.authorization.models import AuthorizationDecision
 from shared.infra.settings import Settings
@@ -124,14 +124,12 @@ class _ActionOverrides(Provider):
         return reads  # type: ignore[return-value]
 
 
-def _host(
-    sessions: _SessionFactory, reads: _ResourceReadTracker
-) -> tuple[PlatformRequestModule, object]:
+def _container(sessions: _SessionFactory, reads: _ResourceReadTracker) -> AsyncContainer:
     settings = Settings(
         database_url="postgresql+psycopg://localhost:1/devops_hub_test",
         token_pepper="test-token-pepper-" * 3,
     )
-    container = BackendContainer(
+    return BackendContainer(
         settings,
         overrides=(
             _SessionFactoryOverride(sessions),
@@ -139,15 +137,6 @@ def _host(
             _AuthorizerOverride(),
         ),
     ).combined()
-    request = Request({"type": "http", "method": "GET", "path": "/"})
-    request.state.request_identity = "test-token"
-    host = PlatformRequestModule(
-        container,
-        request,
-        settings,
-        _Authorizer(),
-    )
-    return host, container
 
 
 def test_platform_dispatch_uses_same_session_for_unit_and_repository(monkeypatch) -> None:
@@ -159,17 +148,19 @@ def test_platform_dispatch_uses_same_session_for_unit_and_repository(monkeypatch
         return trusted
 
     monkeypatch.setattr(
-        "api.platform.module.authenticate_platform_access",
+        "composition.integrations.platform_authorization.authenticate_platform_access",
         authenticate,
     )
     sessions = _SessionFactory()
     reads = _ResourceReadTracker()
-    host, container = _host(sessions, reads)
+    container = _container(sessions, reads)
 
     async def exercise() -> ResourceDetails:
         try:
             async with container() as request_container:
-                host._container = request_container
+                credentials = await request_container.get(RequestCredentials)
+                credentials.identity = "test-token"
+                host = await request_container.get(DeveloperPlatformModule)
                 return await host.query(ReadResource(trusted, uuid4()))
         finally:
             await container.close()
@@ -194,17 +185,19 @@ def test_platform_dispatch_creates_a_fresh_action_unit_for_each_call(monkeypatch
         return trusted
 
     monkeypatch.setattr(
-        "api.platform.module.authenticate_platform_access",
+        "composition.integrations.platform_authorization.authenticate_platform_access",
         authenticate,
     )
     sessions = _SessionFactory()
     reads = _ResourceReadTracker()
-    host, container = _host(sessions, reads)
+    container = _container(sessions, reads)
 
     async def exercise() -> tuple[ResourceDetails, ResourceDetails]:
         try:
             async with container() as request_container:
-                host._container = request_container
+                credentials = await request_container.get(RequestCredentials)
+                credentials.identity = "test-token"
+                host = await request_container.get(DeveloperPlatformModule)
                 first = await host.query(ReadResource(trusted, uuid4()))
                 second = await host.query(ReadResource(trusted, uuid4()))
                 return first, second

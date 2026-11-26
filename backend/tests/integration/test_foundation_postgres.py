@@ -8,7 +8,6 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from conftest import migration_config
-from fastapi import Request
 from fastapi.testclient import TestClient
 from sqlalchemy import event, func, inspect, select, text
 from sqlalchemy.exc import IntegrityError
@@ -17,7 +16,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from api.app import create_app
-from api.composition.identity_preconditions import browser_write_precondition
 from api.core.errors import APIError
 from composition.container import BackendContainer
 from composition.integrations.project_access_persistence import api_token_repository_for_session
@@ -34,6 +32,7 @@ from identity.infra.persistence.models.session import SessionRow
 from identity.infra.persistence.models.user import InternalUserRow
 from identity.infra.security.opaque_secrets import PepperedTokenHasher
 from migrations.metadata import registered_metadata
+from shared.authorization.credentials import RequestCredentials, SessionCredentials
 from shared.infra.persistence.audit import AuditEvent
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 from shared.infra.settings import SCHEMA_REVISION, Settings
@@ -72,18 +71,9 @@ def client_for(sync_engine, config=None):
         asyncio.run(database.dispose())
 
 
-def mutation_request(session_token: str, csrf_token: str, origin: str) -> Request:
-    return Request(
-        {
-            "type": "http",
-            "method": "POST",
-            "headers": [
-                (b"cookie", f"devops_session={session_token}".encode()),
-                (b"x-csrf-token", csrf_token.encode()),
-                (b"origin", origin.encode()),
-            ],
-        }
-    )
+async def dispatch_browser(dispatch, credentials, session, message):
+    credentials.identity = session
+    return await dispatch(message)
 
 
 async def issue_with_container(
@@ -93,18 +83,17 @@ async def issue_with_container(
     try:
         async with container() as scope:
             module = await scope.get(IdentityModule)
-            token, secret = await module.execute_with_precondition(
+            credentials = await scope.get(RequestCredentials)
+            token, secret = await dispatch_browser(
+                module.execute,
+                credentials,
+                SessionCredentials(session_token, csrf_token=csrf_token),
                 CreatePersonalTokenCommand(
                     actor_id,
                     project_id,
                     "integration",
                     kwargs.get("scopes", ("catalog:read",)),
                     kwargs.get("hours", 24),
-                ),
-                browser_write_precondition(
-                    mutation_request(session_token, csrf_token, config.browser_allowed_origins[0]),
-                    actor_id,
-                    PepperedTokenHasher(config.token_pepper.get_secret_value()),
                 ),
             )
             return token.token_id, secret

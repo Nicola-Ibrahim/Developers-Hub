@@ -3,15 +3,17 @@
 import asyncio
 
 import pytest
+from dishka import Provider, Scope, make_async_container
 
 from shared.dispatch import (
     Command,
     HandlerRegistry,
-    ModuleDispatcher,
+    Mediator,
     Query,
     RegistrationError,
     UnsupportedMessage,
 )
+from shared.infra.dispatch import register_handlers
 
 
 class ChangeName(Command[str]):
@@ -32,13 +34,11 @@ class ReadNameHandler:
         return "read"
 
 
-def test_registry_rejects_duplicates_wrong_kind_and_missing_messages() -> None:
+def test_registry_rejects_duplicates_and_wrong_message_kinds() -> None:
     with pytest.raises(RegistrationError, match="more than one"):
         HandlerRegistry(commands=[(ChangeName, ChangeNameHandler)] * 2, queries=[])
     with pytest.raises(RegistrationError, match="wrong kind"):
         HandlerRegistry(commands=[(ReadName, ReadNameHandler)], queries=[])
-    with pytest.raises(RegistrationError, match="required query"):
-        HandlerRegistry(commands=[], queries=[], required_queries=[ReadName])
 
 
 def test_dispatch_resolves_only_selected_handler_and_rejects_unknown() -> None:
@@ -51,7 +51,7 @@ def test_dispatch_resolves_only_selected_handler_and_rejects_unknown() -> None:
         selected.append(handler)
         return handler()
 
-    module = ModuleDispatcher(registry, resolve)
+    module = Mediator(registry, resolve)
 
     async def run() -> None:
         assert await module.execute(ChangeName()) == "changed"
@@ -59,8 +59,25 @@ def test_dispatch_resolves_only_selected_handler_and_rejects_unknown() -> None:
         assert await module.query(ReadName()) == "read"
         assert selected == [ChangeNameHandler, ReadNameHandler]
         with pytest.raises(UnsupportedMessage, match="Unsupported command"):
-            await ModuleDispatcher(HandlerRegistry(commands=[], queries=[]), resolve).execute(
-                ChangeName()
-            )
+            await Mediator(HandlerRegistry(commands=[], queries=[]), resolve).execute(ChangeName())
+
+    asyncio.run(run())
+
+
+def test_registry_also_supplies_dishka_handler_bindings() -> None:
+    registry = HandlerRegistry(
+        commands=[(ChangeName, ChangeNameHandler)], queries=[(ReadName, ReadNameHandler)]
+    )
+    provider = Provider()
+    register_handlers(provider, registry, scope=Scope.APP)
+
+    async def run() -> None:
+        container = make_async_container(provider)
+        try:
+            mediator = Mediator(registry, container.get)
+            assert await mediator.execute(ChangeName()) == "changed"
+            assert await mediator.query(ReadName()) == "read"
+        finally:
+            await container.close()
 
     asyncio.run(run())

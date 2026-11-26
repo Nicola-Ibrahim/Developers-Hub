@@ -2,30 +2,28 @@
 
 from dataclasses import dataclass
 
-from dishka import AsyncContainer, Provider, Scope, provide
+from dishka import AsyncContainer, Provider, Scope, alias, provide
 
-from identity.application.accounts.change_password.handler import ChangePasswordHandler
 from identity.application.accounts.complete_password_setup.handler import (
     CompletePasswordSetupHandler,
 )
 from identity.application.accounts.create_user.handler import CreateUserHandler
 from identity.application.accounts.set_user_status.handler import SetUserStatusHandler
 from identity.application.accounts.start_password_setup.handler import StartPasswordSetupHandler
-from identity.application.api_tokens.authenticate_api_token.handler import (
-    AuthenticateApiTokenHandler,
-)
 from identity.application.api_tokens.revoke_api_token.handler import RevokeApiTokenHandler
-from identity.application.authentication.login.handler import LoginHandler
 from identity.application.interfaces.dispatch import IdentityModule
 from identity.application.interfaces.identity_transactions import IdentityTransaction
 from identity.application.interfaces.security import PasswordHasher, TokenGenerator, TokenHasher
-from identity.application.interfaces.session_tokens import SessionTokenVerifier
+from identity.application.interfaces.session_tokens import SessionTokenIssuer, SessionTokenVerifier
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
-from identity.infra.composition.module import IdentityModuleDispatcher
+from identity.infra.composition.module import IDENTITY_HANDLER_REGISTRY, IDENTITY_REQUEST_MESSAGES
+from identity.infra.composition.module import IdentityModule as RequestIdentityModule
 from identity.infra.persistence.repositories.api_tokens import SQLAlchemyApiTokenRepository
 from identity.infra.security.jwt import JwtSessionTokens
 from identity.infra.security.opaque_secrets import PepperedTokenHasher, SecureTokenGenerator
 from identity.infra.security.passwords import Argon2idPasswordHasher
+from shared.authorization.credentials import RequestCredentials
+from shared.infra.dispatch import register_handlers
 from shared.infra.settings import Settings
 
 
@@ -35,6 +33,16 @@ class IdentityTokenScopePolicy:
 
 
 class IdentityProvider(Provider):
+    def __init__(self) -> None:
+        super().__init__()
+        register_handlers(
+            self,
+            IDENTITY_HANDLER_REGISTRY,
+            scope=Scope.REQUEST,
+            messages=IDENTITY_REQUEST_MESSAGES,
+        )
+
+    session_token_issuer = alias(JwtSessionTokens, provides=SessionTokenIssuer)
     password_hasher = provide(Argon2idPasswordHasher, provides=PasswordHasher, scope=Scope.APP)
 
     @provide(scope=Scope.APP)
@@ -73,34 +81,11 @@ class IdentityProvider(Provider):
     ) -> CompletePasswordSetupHandler:
         return CompletePasswordSetupHandler(transaction, passwords, hasher)
 
-    @provide(scope=Scope.REQUEST)
-    def identity_module(self, container: AsyncContainer) -> IdentityModule:
-        return IdentityModuleDispatcher(container)
-
-    @provide(scope=Scope.REQUEST)
-    def change_password(
-        self,
-        transaction: IdentityTransaction,
-        passwords: PasswordHasher,
-    ) -> ChangePasswordHandler:
-        return ChangePasswordHandler(transaction, passwords)
-
-    @provide(scope=Scope.REQUEST)
-    def login_handler(
-        self,
-        transaction: IdentityTransaction,
-        passwords: PasswordHasher,
-        generator: TokenGenerator,
-        token_hasher: TokenHasher,
-        session_token_issuer: JwtSessionTokens,
-    ) -> LoginHandler:
-        return LoginHandler(
-            transaction,
-            passwords,
-            generator,
-            token_hasher,
-            session_token_issuer,
-        )
+    @provide(scope=Scope.REQUEST, provides=IdentityModule)
+    def identity_module(
+        self, container: AsyncContainer, credentials: RequestCredentials
+    ) -> RequestIdentityModule:
+        return RequestIdentityModule(container, credentials)
 
     @provide(scope=Scope.APP)
     def hasher(self, settings: Settings) -> TokenHasher:
@@ -113,5 +98,4 @@ class IdentityProvider(Provider):
     repository = provide(
         SQLAlchemyApiTokenRepository, provides=ApiTokenRepository, scope=Scope.REQUEST
     )
-    authenticate = provide(AuthenticateApiTokenHandler, scope=Scope.REQUEST)
     revoke = provide(RevokeApiTokenHandler, scope=Scope.REQUEST)

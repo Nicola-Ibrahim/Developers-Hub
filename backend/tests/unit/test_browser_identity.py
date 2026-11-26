@@ -5,7 +5,6 @@ from uuid import uuid4
 import pytest
 from starlette.requests import Request
 
-from api.composition.identity_preconditions import browser_write_precondition
 from api.core.errors import APIError
 from api.identity.authentication.credentials import (
     BrowserCredentials,
@@ -21,6 +20,7 @@ from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.handler import (
     LoginHandler,
 )
+from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.shared.principal import principal_for_project
 from identity.domain.errors import IdentityValidationError
 from identity.domain.password_policy import validate_password
@@ -28,9 +28,11 @@ from identity.domain.records import AccountCredentials, MembershipDetails
 from identity.domain.session_errors import SessionAuthenticationRejected
 from identity.domain.value_objects.session_expiry import SessionExpiry
 from identity.domain.value_objects.user_name import UserName
+from identity.infra.composition.module import IdentityModule
 from identity.infra.security.jwt import JwtSessionTokens
 from identity.infra.security.opaque_secrets import PepperedTokenHasher
 from identity.infra.security.passwords import Argon2idPasswordHasher
+from shared.authorization.credentials import RequestCredentials
 
 
 def test_browser_mutation_checks_origin_before_locking_and_rejects_invalid_csrf():
@@ -61,16 +63,22 @@ def test_browser_mutation_checks_origin_before_locking_and_rejects_invalid_csrf(
             cookies=b"devops_session=session",
         )
         require_browser_origin(mutation, ("https://hub.test",))
-        return await browser_write_precondition(mutation, user_id, hasher)(Repository(), None)
+
+        class Container:
+            async def get(self, _dependency):
+                return hasher
+
+        module = IdentityModule(Container(), RequestCredentials(browser_credentials(mutation)))
+        check = await module._precondition(LogoutCommand("session"))
+        return await check(Repository(), None)
 
     with pytest.raises(APIError) as origin_denied:
         asyncio.run(authorize("https://other.test"))
     assert origin_denied.value.status == 401
     assert calls == []
 
-    with pytest.raises(APIError) as csrf_denied:
+    with pytest.raises(SessionAuthenticationRejected):
         asyncio.run(authorize("https://hub.test/"))
-    assert csrf_denied.value.status == 401
     assert calls == [
         (hasher.digest("session"), None, True),
         (hasher.digest("session"), hasher.digest("csrf")),

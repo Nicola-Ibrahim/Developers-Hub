@@ -17,14 +17,4 @@ ActionPrecondition = Callable[
 class IdentityModule(Protocol):
     async def execute(self, command: Command[ResultT]) -> ResultT: ...
 
-    async def execute_with_precondition(
-        self,
-        command: Command[ResultT],
-        precondition: ActionPrecondition,
-    ) -> ResultT: ...
-
     async def query(self, query: Query[ResultT]) -> ResultT: ...
-
-    async def query_with_precondition(
-        self, query: Query[ResultT], precondition: ActionPrecondition
-    ) -> ResultT: ...

@@ -1,6 +1,7 @@
-"""Explicit identity message registration and lazy module dispatch."""
+"""Explicit Identity message registration and application dispatch."""
 
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TypeVar, cast
 from uuid import UUID
 
@@ -27,12 +28,15 @@ from identity.application.api_tokens.personal_token_messages import (
 from identity.application.authentication.authenticate_session.handler import (
     AuthenticateSessionHandler,
 )
-from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
+from identity.application.authentication.authenticate_session.query import (
+    AuthenticateSessionQuery,
+)
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.handler import LoginHandler
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
 from identity.application.interfaces.dispatch import ActionPrecondition
+from identity.application.interfaces.security import TokenHasher
 from identity.application.profile.handlers import (
     ReadProfileHandler,
     SecurityHistoryHandler,
@@ -55,14 +59,16 @@ from identity.application.sessions.select_active_project.handler import (
     SelectActiveProjectHandler,
 )
 from identity.application.shared.errors import IdentityUnavailable
+from identity.domain.errors import AuthenticationRejected
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.interfaces.session_repository import SessionRepository
 from identity.domain.records import SessionPrincipal
 from identity.domain.session_errors import SessionAuthenticationRejected
+from shared.authorization.credentials import RequestCredentials, SessionCredentials
 from shared.authorization.dispatch import require_authorized
 from shared.authorization.interfaces import AuthorizationDecisionPort, AuthorizationDenied
 from shared.authorization.models import AuthorizationRequest
-from shared.dispatch import Command, HandlerRegistry, ModuleDispatcher, Query, UnsupportedMessage
+from shared.dispatch import Command, HandlerRegistry, Mediator, Query
 from shared.infra.persistence.unit_of_work import DatabaseUnavailable, SqlAlchemyUnitOfWork
 
 ResultT = TypeVar("ResultT")
@@ -89,82 +95,66 @@ IDENTITY_HANDLER_REGISTRY = HandlerRegistry(
         (SecurityHistoryQuery, SecurityHistoryHandler),
         (ListPersonalTokensQuery, PersonalTokenQueryHandler),
     ),
-    required_commands=(
-        LoginCommand,
-        RotateCsrfCommand,
-        SelectActiveProjectCommand,
-        LogoutCommand,
-        RevokeAllSessionsCommand,
-        RevokeSessionCommand,
-        ChangePasswordCommand,
-        UpdateProfileCommand,
-        CreatePersonalTokenCommand,
-        RotatePersonalTokenCommand,
-        RevokePersonalTokenCommand,
-    ),
-    required_queries=(
-        AuthenticateApiTokenQuery,
-        AuthenticateSessionQuery,
-        ListSessionsQuery,
-        ProfileQuery,
-        SecurityHistoryQuery,
-        ListPersonalTokensQuery,
-    ),
 )
 
 
-class IdentityModuleDispatcher(ModuleDispatcher):
-    def __init__(self, container: AsyncContainer) -> None:
+IDENTITY_REQUEST_MESSAGES = (LoginCommand, ChangePasswordCommand, AuthenticateApiTokenQuery)
+
+
+class IdentityModule:
+    """Route public Identity messages and secure browser operations internally."""
+
+    def __init__(self, container: AsyncContainer, credentials: RequestCredentials) -> None:
         self._container = container
-        super().__init__(IDENTITY_HANDLER_REGISTRY, container.get)
+        self._credentials = credentials
+        self._mediator = Mediator(IDENTITY_HANDLER_REGISTRY, container.get)
 
     async def execute(self, command: Command[ResultT]) -> ResultT:
         if type(command) not in IDENTITY_HANDLER_REGISTRY.commands:
-            return await super().execute(command)
+            return await self._mediator.execute(command)
         if isinstance(command, LoginCommand):
-            return await super().execute(cast(Command[ResultT], command))
-        raise SessionAuthenticationRejected()
-
-    async def execute_with_precondition(
-        self, command: Command[ResultT], precondition: ActionPrecondition
-    ) -> ResultT:
-        if type(command) not in IDENTITY_HANDLER_REGISTRY.commands or isinstance(
-            command, LoginCommand
-        ):
-            raise UnsupportedMessage("Unsupported protected command")
-        guard = self._secured_precondition(command, precondition)
+            return cast(ResultT, await self._mediator.execute(command))
+        precondition = await self._precondition(command)
         if isinstance(command, ChangePasswordCommand):
-            handler = await self._container.get(ChangePasswordHandler)
-            await handler.execute(command, guard)
+            handler = cast(ChangePasswordHandler, await self._mediator.resolve(command))
+            await handler.execute(command, precondition)
             return cast(ResultT, None)
-        return await self._dispatch_action(lambda dispatcher: dispatcher.execute(command), guard)
+        return await self._dispatch_action(lambda mediator: mediator.execute(command), precondition)
 
     async def query(self, query: Query[ResultT]) -> ResultT:
         if type(query) not in IDENTITY_HANDLER_REGISTRY.queries:
-            return await super().query(query)
-        if type(query) is AuthenticateApiTokenQuery:
-            return await super().query(cast(Query[ResultT], query))
-        if type(query) is AuthenticateSessionQuery:
-            return await self._dispatch_action(
-                lambda dispatcher: dispatcher.query(cast(Query[ResultT], query))
+            return await self._mediator.query(query)
+        if isinstance(query, AuthenticateApiTokenQuery):
+            if query.token is not None and query.token != self._credentials.identity:
+                raise AuthenticationRejected()
+            return cast(ResultT, await self._mediator.query(query))
+        if isinstance(query, AuthenticateSessionQuery):
+            identity = self._session_credentials()
+            if query.session_token != identity.session_token:
+                raise SessionAuthenticationRejected()
+            return cast(
+                ResultT, await self._dispatch_action(lambda mediator: mediator.query(query))
             )
-        raise SessionAuthenticationRejected()
-
-    async def query_with_precondition(
-        self, query: Query[ResultT], precondition: ActionPrecondition
-    ) -> ResultT:
-        if type(query) not in IDENTITY_HANDLER_REGISTRY.queries or isinstance(
-            query, (AuthenticateApiTokenQuery, AuthenticateSessionQuery)
-        ):
-            raise UnsupportedMessage("Unsupported protected query")
         return await self._dispatch_action(
-            lambda dispatcher: dispatcher.query(query),
-            self._secured_precondition(query, precondition),
+            lambda mediator: mediator.query(query), await self._precondition(query)
         )
 
-    def _secured_precondition(
-        self, message: object, authenticate: ActionPrecondition
-    ) -> ActionPrecondition:
+    async def _precondition(self, message: object) -> ActionPrecondition:
+        credentials = self._session_credentials()
+        token = credentials.session_token
+        if token is None:
+            raise SessionAuthenticationRejected()
+        if getattr(message, "session_token", token) != token:
+            raise SessionAuthenticationRejected()
+        hasher = await self._container.get(TokenHasher)
+        digest = hasher.digest(token)
+        verify_csrf = isinstance(message, Command) and not isinstance(message, RotateCsrfCommand)
+        csrf_digest = (
+            hasher.digest(credentials.csrf_token)
+            if verify_csrf and credentials.csrf_token
+            else None
+        )
+
         async def check(
             sessions: SessionRepository, tokens: ApiTokenRepository | None
         ) -> SessionPrincipal:
@@ -174,9 +164,19 @@ class IdentityModuleDispatcher(ModuleDispatcher):
                 token_id = message.token_id
                 if tokens is None:
                     raise SessionAuthenticationRejected()
-                # Token revocation and authentication acquire the token row first.
+                # The token row must be acquired before session authentication locks the user.
                 target = await tokens.lock_personal_token(token_id, user_id=message.actor_id)
-            principal = await authenticate(sessions, tokens)
+            principal = await sessions.authorize_session_operation(
+                digest,
+                credentials.project_id,
+                datetime.now(UTC),
+                lock_for_mutation=verify_csrf,
+            )
+            if principal is None or (
+                verify_csrf
+                and (csrf_digest is None or not await sessions.validate_csrf(digest, csrf_digest))
+            ):
+                raise SessionAuthenticationRejected()
             if getattr(message, "actor_id", principal.user_id) != principal.user_id:
                 raise SessionAuthenticationRejected()
 
@@ -236,13 +236,19 @@ class IdentityModuleDispatcher(ModuleDispatcher):
 
         return check
 
+    def _session_credentials(self) -> SessionCredentials:
+        identity = self._credentials.identity
+        if not isinstance(identity, SessionCredentials):
+            raise SessionAuthenticationRejected()
+        return identity
+
     async def _dispatch_action(
         self,
-        dispatch: Callable[[ModuleDispatcher], Awaitable[ResultT]],
+        dispatch: Callable[[Mediator], Awaitable[ResultT]],
         precondition: ActionPrecondition | None = None,
     ) -> ResultT:
         async with self._container(scope=Scope.ACTION) as action_container:
-            dispatcher = ModuleDispatcher(
+            mediator = Mediator(
                 IDENTITY_HANDLER_REGISTRY,
                 lambda handler_type: action_container.get(
                     handler_type, component="identity_action"
@@ -259,12 +265,9 @@ class IdentityModuleDispatcher(ModuleDispatcher):
                         ApiTokenRepository, component="identity_action"
                     )
                     await precondition(sessions, tokens)
-                return await dispatch(dispatcher)
+                return await dispatch(mediator)
 
             try:
-                return await unit.run(
-                    run,
-                    lambda result: result,
-                )
+                return await unit.run(run, lambda result: result)
             except DatabaseUnavailable as error:
                 raise IdentityUnavailable() from error

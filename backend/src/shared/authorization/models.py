@@ -15,6 +15,7 @@ class AuthorizationRequest:
     role: str | None = None
     scopes: tuple[str, ...] = ()
     owner_id: UUID | None = None
+    target_exists: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

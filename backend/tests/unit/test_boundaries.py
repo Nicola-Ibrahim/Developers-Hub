@@ -146,19 +146,15 @@ def violation(module, target):
             return False
         api_adapters = {
             "api.app",
-            "api.platform.module",
             "api.health.metrics_adapter",
         }
-        is_api_composition = module.startswith("api.composition.")
-        if module in api_adapters or is_api_composition:
+        if module in api_adapters:
             is_context_infrastructure = target_context is not None and "infra" in target_parts
             if is_context_infrastructure or target.startswith("shared.infra."):
                 return False
             if module == "api.app" and other == "composition":
                 return False
-            if (
-                module in {"api.app", "api.health.metrics_adapter"} or is_api_composition
-            ) and other in {
+            if (module in {"api.app", "api.health.metrics_adapter"}) and other in {
                 "dishka",
                 "sqlalchemy",
             }:
@@ -177,8 +173,16 @@ def violation(module, target):
             or "infra" in target_parts[1:]
         )
     if root == "composition":
+        http_bindings = ("api.health.metrics", "api.health.metrics_adapter", "api.settings.config")
         return other in {"containers", "entrypoints"} or (
-            other == "api" and not target.startswith("api.composition.")
+            other == "api"
+            and (
+                module != "composition.container"
+                or not any(
+                    target == path or target.startswith(path + ".") or path.startswith(target + ".")
+                    for path in http_bindings
+                )
+            )
         )
     return False
 
@@ -188,6 +192,7 @@ def test_source_import_contracts():
         path.name for path in SRC.iterdir() if path.is_dir() and not path.name.startswith("__")
     }
     assert actual_roots == ROOTS
+    assert not (SRC / "api" / "composition").exists()
     assert not (SRC / "developer_platform").exists()
     assert not (SRC / "devops_hub").exists()
     assert not any((SRC / root).exists() for root in RETIRED_ROOTS)
@@ -261,7 +266,11 @@ def test_indirect_package_reexport_cannot_smuggle_infrastructure_into_core():
             "from devops_platform.infra import persistence",
             True,
         ),
-        ("api.platform.module", "from devops_platform.infra.composition import module", False),
+        (
+            "composition.integrations.platform_dispatch",
+            "from devops_platform.infra.composition import module",
+            False,
+        ),
         ("shared.infra.database", "import containers.http", True),
         ("identity.contracts", "from .infra import tokens", True),
         ("identity.infra.security.opaque_secrets", "from shared.infra import database", False),

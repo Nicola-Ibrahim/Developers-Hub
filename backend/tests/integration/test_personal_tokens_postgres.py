@@ -7,13 +7,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from test_foundation_postgres import async_engine_for, mutation_request
+from test_foundation_postgres import async_engine_for, dispatch_browser
 
-from api.composition.identity_preconditions import (
-    browser_read_precondition,
-    browser_write_precondition,
-)
-from api.core.errors import APIError
 from composition.container import BackendContainer
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
 from identity.application.api_tokens.personal_token_messages import (
@@ -27,6 +22,7 @@ from identity.infra.persistence.models.api_token import ApiAccessTokenRow
 from identity.infra.persistence.models.session import SessionRow
 from identity.infra.persistence.models.user import InternalUserRow
 from identity.infra.security.opaque_secrets import PepperedTokenHasher
+from shared.authorization.credentials import RequestCredentials, SessionCredentials
 from shared.infra.settings import Settings
 
 pytestmark = pytest.mark.postgres
@@ -90,60 +86,58 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
         browser_allowed_origins=(ORIGIN,),
     )
 
-    def first_guard():
-        return browser_write_precondition(
-            mutation_request(first_session, first_csrf, ORIGIN),
-            user_id,
-            hasher,
-        )
+    def first_credentials():
+        return SessionCredentials(first_session, csrf_token=first_csrf)
 
-    def second_guard():
-        return browser_write_precondition(
-            mutation_request(second_session, second_csrf, ORIGIN),
-            user_id,
-            hasher,
-        )
+    def second_credentials():
+        return SessionCredentials(second_session, csrf_token=second_csrf)
 
-    async def use_module(identity: IdentityModule):
-        created_a, _ = await identity.execute_with_precondition(
+    async def use_module(identity: IdentityModule, credentials: RequestCredentials):
+        created_a, _ = await dispatch_browser(
+            identity.execute,
+            credentials,
+            first_credentials(),
             CreatePersonalTokenCommand(user_id, project_a, "a", ("catalog:read",), 1),
-            first_guard(),
         )
-        created_b, _ = await identity.execute_with_precondition(
+        created_b, _ = await dispatch_browser(
+            identity.execute,
+            credentials,
+            second_credentials(),
             CreatePersonalTokenCommand(user_id, project_b, "b", ("resources:read",), 8),
-            second_guard(),
         )
         assert [
             item.token_id
-            for item in await identity.query_with_precondition(
+            for item in await dispatch_browser(
+                identity.query,
+                credentials,
+                SessionCredentials(first_session),
                 ListPersonalTokensQuery(user_id, project_a),
-                browser_read_precondition(
-                    mutation_request(first_session, first_csrf, ORIGIN), user_id, hasher
-                ),
             )
         ] == [created_a.token_id]
         assert [
             item.token_id
-            for item in await identity.query_with_precondition(
+            for item in await dispatch_browser(
+                identity.query,
+                credentials,
+                SessionCredentials(second_session),
                 ListPersonalTokensQuery(user_id, project_b),
-                browser_read_precondition(
-                    mutation_request(second_session, second_csrf, ORIGIN), user_id, hasher
-                ),
             )
         ] == [created_b.token_id]
         assert (
-            await identity.query_with_precondition(
+            await dispatch_browser(
+                identity.query,
+                credentials,
+                SessionCredentials(outsider_session),
                 ListPersonalTokensQuery(other_user, project_a),
-                browser_read_precondition(
-                    mutation_request(outsider_session, outsider_csrf, ORIGIN), other_user, hasher
-                ),
             )
             == ()
         )
 
-        rotated, secret = await identity.execute_with_precondition(
+        rotated, secret = await dispatch_browser(
+            identity.execute,
+            credentials,
+            first_credentials(),
             RotatePersonalTokenCommand(user_id, created_a.token_id),
-            first_guard(),
         )
         assert secret
         assert rotated.token_id != created_a.token_id
@@ -168,32 +162,37 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
             assert switched_session is not None
             switched_session.selected_project_id = project_a
 
-        with pytest.raises(APIError) as revoked:
-            await identity.execute_with_precondition(
-                RotatePersonalTokenCommand(user_id, rotated.token_id),
-                first_guard(),
-            )
-        assert revoked.value.status == 401
         with pytest.raises(SessionAuthenticationRejected):
-            await identity.execute_with_precondition(
+            await dispatch_browser(
+                identity.execute,
+                credentials,
+                first_credentials(),
+                RotatePersonalTokenCommand(user_id, rotated.token_id),
+            )
+        with pytest.raises(SessionAuthenticationRejected):
+            await dispatch_browser(
+                identity.execute,
+                credentials,
+                second_credentials(),
                 CreatePersonalTokenCommand(user_id, project_b, "stale", ("resources:read",), 8),
-                second_guard(),
             )
         with Session(postgres_engine) as session:
             preserved = session.get(ApiAccessTokenRow, rotated.token_id)
             assert preserved is not None and preserved.revoked_at is None
-        assert await identity.query_with_precondition(
+        assert await dispatch_browser(
+            identity.query,
+            credentials,
+            SessionCredentials(second_session),
             ListPersonalTokensQuery(user_id, project_b),
-            browser_read_precondition(
-                mutation_request(second_session, second_csrf, ORIGIN), user_id, hasher
-            ),
         ) == (created_b,)
 
     async def exercise():
         container = BackendContainer(settings, engine=database).combined()
         try:
             async with container() as scope:
-                await use_module(await scope.get(IdentityModule))
+                await use_module(
+                    await scope.get(IdentityModule), await scope.get(RequestCredentials)
+                )
         finally:
             await container.close()
             await database.dispose()

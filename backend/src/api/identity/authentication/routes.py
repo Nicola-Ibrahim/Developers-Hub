@@ -5,7 +5,6 @@ from typing import Annotated
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Header, Request, Response
 
-from api.composition.identity_preconditions import browser_write_precondition
 from api.core.errors import APIError
 from api.identity.authentication.credentials import (
     CSRF_HEADER,
@@ -21,7 +20,6 @@ from api.settings.config import BrowserCookiePolicy
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.interfaces.dispatch import IdentityModule
-from identity.application.interfaces.security import TokenHasher
 from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand
 from identity.application.sessions.select_active_project.command import (
     SelectActiveProjectCommand,
@@ -70,16 +68,12 @@ async def select_project(
     request: Request,
     _csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
     module: FromDishka[IdentityModule],
-    hasher: FromDishka[TokenHasher],
 ) -> dict[str, object]:
     command = SelectActiveProjectCommand(
         require_cookie_session(browser_credentials(request)),
         body.project_id,
     )
-    principal = await module.execute_with_precondition(
-        command,
-        browser_write_precondition(request, request.state.identity_principal.user_id, hasher),
-    )
+    principal = await module.execute(command)
     return {"csrfToken": principal.csrf_token, "principal": _principal(principal)}
 
 
@@ -89,17 +83,13 @@ async def logout(
     request: Request,
     _csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
     response: Response,
-    module: FromDishka[IdentityModule],
     cookie_policy: FromDishka[BrowserCookiePolicy],
-    hasher: FromDishka[TokenHasher],
+    module: FromDishka[IdentityModule],
 ) -> Response:
     command = LogoutCommand(
         require_cookie_session(browser_credentials(request)),
     )
-    await module.execute_with_precondition(
-        command,
-        browser_write_precondition(request, request.state.identity_principal.user_id, hasher),
-    )
+    await module.execute(command)
     response.delete_cookie(
         SESSION_COOKIE,
         path="/api/v1",
@@ -117,15 +107,11 @@ async def logout_all(
     request: Request,
     _csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
     response: Response,
-    module: FromDishka[IdentityModule],
     cookie_policy: FromDishka[BrowserCookiePolicy],
-    hasher: FromDishka[TokenHasher],
+    module: FromDishka[IdentityModule],
 ) -> dict[str, int]:
     command = RevokeAllSessionsCommand(request.state.identity_principal.user_id)
-    count = await module.execute_with_precondition(
-        command,
-        browser_write_precondition(request, request.state.identity_principal.user_id, hasher),
-    )
+    count = await module.execute(command)
     response.delete_cookie(
         SESSION_COOKIE,
         path="/api/v1",

@@ -19,6 +19,14 @@ class OpaAuthorizationClient:
         self._timeout = timeout
 
     async def evaluate(self, request: AuthorizationRequest) -> AuthorizationDecision:
+        resource: dict[str, str | bool | None] = {
+            "kind": request.resource_kind,
+            "id": str(request.resource_id) if request.resource_id else None,
+            "project_id": str(request.project_id) if request.project_id else None,
+            "owner_id": str(request.owner_id) if request.owner_id else None,
+        }
+        if request.target_exists is not None:
+            resource["exists"] = request.target_exists
         payload = {
             "input": {
                 "subject": {
@@ -30,12 +38,7 @@ class OpaAuthorizationClient:
                     else None,
                 },
                 "action": request.action,
-                "resource": {
-                    "kind": request.resource_kind,
-                    "id": str(request.resource_id) if request.resource_id else None,
-                    "project_id": str(request.project_id) if request.project_id else None,
-                    "owner_id": str(request.owner_id) if request.owner_id else None,
-                },
+                "resource": resource,
             }
         }
         try:

@@ -6,10 +6,6 @@ from uuid import UUID
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Header, Request, Response
 
-from api.composition.identity_preconditions import (
-    browser_read_precondition,
-    browser_write_precondition,
-)
 from api.identity.authentication.credentials import (
     CSRF_HEADER,
     SESSION_COOKIE,
@@ -21,7 +17,6 @@ from api.identity.sessions.schemas import PasswordBody
 from api.settings.config import BrowserCookiePolicy
 from identity.application.accounts.change_password.command import ChangePasswordCommand
 from identity.application.interfaces.dispatch import IdentityModule
-from identity.application.interfaces.security import TokenHasher
 from identity.application.sessions.list_sessions.query import ListSessionsQuery
 from identity.application.sessions.revoke_session.command import RevokeSessionCommand
 from identity.application.sessions.rotate_csrf.command import RotateCsrfCommand
@@ -35,13 +30,9 @@ async def browser_me(
     request: Request,
     response: Response,
     module: FromDishka[IdentityModule],
-    hasher: FromDishka[TokenHasher],
 ) -> dict[str, object]:
     command = RotateCsrfCommand(require_cookie_session(browser_credentials(request)))
-    principal = await module.execute_with_precondition(
-        command,
-        browser_read_precondition(request, request.state.identity_principal.user_id, hasher),
-    )
+    principal = await module.execute(command)
     response.headers["Cache-Control"] = "no-store"
     return {"csrfToken": principal.csrf_token, "principal": _principal(principal)}
 
@@ -52,14 +43,11 @@ async def sessions(
     request: Request,
     response: Response,
     module: FromDishka[IdentityModule],
-    hasher: FromDishka[TokenHasher],
 ) -> list[dict[str, object]]:
     response.headers["Cache-Control"] = "no-store"
     actor = request.state.identity_principal
     query = ListSessionsQuery(actor.user_id, actor.session_id)
-    values = await module.query_with_precondition(
-        query, browser_read_precondition(request, actor.user_id, hasher)
-    )
+    values = await module.query(query)
     return [
         {
             "sessionId": str(item.session_id),
@@ -81,16 +69,12 @@ async def revoke_session(
     _csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
     response: Response,
     module: FromDishka[IdentityModule],
-    hasher: FromDishka[TokenHasher],
 ) -> Response:
     command = RevokeSessionCommand(
         request.state.identity_principal.user_id,
         session_id,
     )
-    await module.execute_with_precondition(
-        command,
-        browser_write_precondition(request, request.state.identity_principal.user_id, hasher),
-    )
+    await module.execute(command)
     response.status_code = 204
     return response
 
@@ -102,17 +86,14 @@ async def change_password(
     request: Request,
     _csrf_token: Annotated[str, Header(alias=CSRF_HEADER)],
     response: Response,
-    module: FromDishka[IdentityModule],
     cookie_policy: FromDishka[BrowserCookiePolicy],
-    hasher: FromDishka[TokenHasher],
+    module: FromDishka[IdentityModule],
 ) -> Response:
     actor = request.state.identity_principal
     command = ChangePasswordCommand(
         actor.user_id, actor.user_name, body.current_password, body.new_password
     )
-    await module.execute_with_precondition(
-        command, browser_write_precondition(request, actor.user_id, hasher)
-    )
+    await module.execute(command)
     response.delete_cookie(
         SESSION_COOKIE,
         path="/api/v1",

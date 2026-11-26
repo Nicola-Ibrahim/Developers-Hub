@@ -6,15 +6,6 @@ from pathlib import Path
 from dishka import Provider, Scope, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from devops_platform.application.applications.create_application.handler import (
-    CreateApplicationHandler,
-)
-from devops_platform.application.applications.get_application.handler import (
-    ReadApplicationHandler,
-)
-from devops_platform.application.applications.list_applications.handler import (
-    ReadApplicationsHandler,
-)
 from devops_platform.application.applications.read_templates.handler import (
     ReadTemplatesHandler,
 )
@@ -33,24 +24,6 @@ from devops_platform.application.interfaces.software_delivery import (
     RequestFingerprint,
     TemplateCatalog,
     WebhookSignatureVerifier,
-)
-from devops_platform.application.software_delivery.attach_database.handler import (
-    AttachApplicationResourceHandler,
-)
-from devops_platform.application.software_delivery.create_local_preview.handler import (
-    CreateLocalPreviewHandler,
-)
-from devops_platform.application.software_delivery.deploy_application.handler import (
-    DeployApplicationHandler,
-)
-from devops_platform.application.software_delivery.handle_preview_webhook.handler import (
-    ProcessGithubPreviewWebhookHandler,
-)
-from devops_platform.application.software_delivery.read_deployment_history.handler import (
-    ReadDeploymentHistoryHandler,
-)
-from devops_platform.application.software_delivery.retry_delivery_step.handler import (
-    RetryDeliveryStepHandler,
 )
 from devops_platform.infra.composition.application_bindings import (
     SQLAlchemyApplicationDatabaseBindings,
@@ -180,34 +153,6 @@ class ApplicationDeliveryProvider(Provider):
         if settings.github_webhook_secret is None:
             return None
         return HmacGitHubWebhookVerifier(settings.github_webhook_secret.get_secret_value())
-
-    create_application_handler = provide(CreateApplicationHandler, scope=Scope.REQUEST)
-    create_local_preview_handler = provide(CreateLocalPreviewHandler, scope=Scope.REQUEST)
-    attach_application_resource_handler = provide(
-        AttachApplicationResourceHandler, scope=Scope.REQUEST
-    )
-    deploy_application_handler = provide(DeployApplicationHandler, scope=Scope.REQUEST)
-    retry_delivery_step_handler = provide(RetryDeliveryStepHandler, scope=Scope.REQUEST)
-    read_applications_handler = provide(ReadApplicationsHandler, scope=Scope.REQUEST)
-    read_application_handler = provide(ReadApplicationHandler, scope=Scope.REQUEST)
-    read_deployment_history_handler = provide(ReadDeploymentHistoryHandler, scope=Scope.REQUEST)
-
-    @provide(scope=Scope.REQUEST)
-    def process_preview_webhook_handler(
-        self,
-        repository: PreviewWebhookRepository,
-        images: ApprovedImageCatalog,
-        verifier: WebhookSignatureVerifier | None,
-        settings: Settings,
-    ) -> ProcessGithubPreviewWebhookHandler:
-        return ProcessGithubPreviewWebhookHandler(
-            repository,
-            images,
-            verifier,
-            settings.github_allowed_repository_owner,
-            settings.preview_owner_id,
-            settings.preview_ttl_seconds,
-        )
 
     @provide(scope=Scope.REQUEST)
     def approved_image_catalog(self, images: StaticApprovedImageCatalog) -> ApprovedImageCatalog:

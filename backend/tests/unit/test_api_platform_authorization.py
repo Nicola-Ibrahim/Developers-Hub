@@ -5,14 +5,14 @@ from uuid import uuid4
 
 import pytest
 from dishka import Scope
-from starlette.requests import Request
 
 from api.platform.application_delivery.routes import applications
 from api.platform.catalog.routes import catalog
-from api.platform.module import PlatformRequestModule
+from composition.integrations.platform_authorization import DeveloperPlatformModule
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import CatalogForbidden, PlatformRequestError
 from identity.domain.interfaces.project_access import IdentityProjectAccess
+from shared.authorization.credentials import RequestCredentials
 from shared.authorization.models import AuthorizationDecision
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
@@ -78,12 +78,14 @@ def test_denied_platform_action_does_not_dispatch(route) -> None:
     from unittest.mock import patch
 
     handler = route.__dishka_orig_func__
-    request = Request({"type": "http", "method": "GET", "path": "/"})
-    request.state.request_identity = "private-test-token"
-    host = PlatformRequestModule(Container(), request, object(), DenyAuthorization())
+    credentials = RequestCredentials("private-test-token")
+    host = DeveloperPlatformModule(Container(), credentials, object(), DenyAuthorization())
 
     async def invoke() -> None:
-        with patch("api.platform.module.authenticate_platform_access", authenticate):
+        with patch(
+            "composition.integrations.platform_authorization.authenticate_platform_access",
+            authenticate,
+        ):
             with pytest.raises((CatalogForbidden, PlatformRequestError)):
                 await handler(access, host)
 

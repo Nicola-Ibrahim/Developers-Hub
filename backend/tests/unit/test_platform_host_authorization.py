@@ -5,9 +5,8 @@ from uuid import uuid4
 
 import pytest
 from dishka import Scope
-from starlette.requests import Request
 
-from api.platform.module import PlatformRequestModule
+from composition.integrations.platform_authorization import DeveloperPlatformModule
 from devops_platform.application.resource_management.get_resource.handler import (
     ReadResourceHandler,
 )
@@ -17,6 +16,7 @@ from devops_platform.application.resource_management.get_resource.query import (
 from devops_platform.application.shared.errors import CatalogForbidden
 from devops_platform.domain.value_objects.access_context import AccessContext
 from identity.domain.interfaces.project_access import IdentityProjectAccess
+from shared.authorization.credentials import RequestCredentials
 from shared.authorization.models import AuthorizationDecision
 from shared.infra.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
@@ -83,10 +83,11 @@ def test_http_host_rechecks_trusted_access_and_rolls_back_denial(monkeypatch) ->
         events.append("authenticate")
         return trusted
 
-    monkeypatch.setattr("api.platform.module.authenticate_platform_access", authenticate)
-    request = Request({"type": "http", "method": "GET", "path": "/"})
-    request.state.request_identity = "private-token"
-    host = PlatformRequestModule(Container(), request, object(), Authorizer(False))
+    monkeypatch.setattr(
+        "composition.integrations.platform_authorization.authenticate_platform_access", authenticate
+    )
+    credentials = RequestCredentials("private-token")
+    host = DeveloperPlatformModule(Container(), credentials, object(), Authorizer(False))
 
     with pytest.raises(CatalogForbidden):
         asyncio.run(host.query(ReadResource(forged, uuid4())))
@@ -141,11 +142,12 @@ def test_http_host_dispatches_with_authenticated_actor_not_message_claims(monkey
         events.append("authenticate")
         return trusted
 
-    monkeypatch.setattr("api.platform.module.authenticate_platform_access", authenticate)
-    request = Request({"type": "http", "method": "GET", "path": "/"})
-    request.state.request_identity = "private-token"
+    monkeypatch.setattr(
+        "composition.integrations.platform_authorization.authenticate_platform_access", authenticate
+    )
+    credentials = RequestCredentials("private-token")
     authorizer = Authorizer(True)
-    host = PlatformRequestModule(Container(), request, object(), authorizer)
+    host = DeveloperPlatformModule(Container(), credentials, object(), authorizer)
 
     assert asyncio.run(host.query(ReadResource(forged, uuid4()))) == trusted
     assert authorizer.requests[0].subject_id == trusted.user_id

@@ -18,7 +18,6 @@ from identity.application.authentication.authenticate_session.query import Authe
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.result import LoginResult
 from identity.application.interfaces.dispatch import IdentityModule
-from identity.application.interfaces.security import TokenHasher
 from identity.application.interfaces.session_tokens import SessionTokenVerifier
 from identity.application.profile.profile_query import ProfileQuery
 from identity.application.profile.update_profile import UpdateProfileCommand
@@ -27,7 +26,9 @@ from identity.application.sessions.revoke_session.command import RevokeSessionCo
 from identity.application.sessions.rotate_csrf.command import RotateCsrfCommand
 from identity.application.sessions.select_active_project.command import SelectActiveProjectCommand
 from identity.domain.records import AccountProfile, PersonalApiToken, SessionPrincipal
+from identity.domain.session_errors import SessionAuthenticationRejected
 from identity.infra.security.jwt import JwtSessionTokens
+from shared.authorization.credentials import RequestCredentials
 from shared.authorization.interfaces import AuthorizationDecisionPort, AuthorizationUnavailable
 from shared.authorization.models import AuthorizationDecision
 
@@ -47,13 +48,24 @@ class Identity:
         )
 
     async def query(self, query):
-        self.normal_calls.append(query)
-        assert isinstance(query, AuthenticateSessionQuery)
-        return self.principal
+        if isinstance(query, AuthenticateSessionQuery):
+            self.normal_calls.append(query)
+            return self.principal
+        self.guarded_calls.append(query)
+        self.queries.append(query)
+        self.executed.append(query)
+        if isinstance(query, ProfileQuery):
+            return AccountProfile(USER, "alice", None)
+        return ()
 
     async def execute(self, command):
+        if not isinstance(command, LoginCommand):
+            self.guarded_calls.append(command)
+            if not self.csrf_valid:
+                raise SessionAuthenticationRejected()
+            self.executed.append(command)
+            return self._result(command)
         self.normal_calls.append(command)
-        assert isinstance(command, LoginCommand)
         self.commands.append(command)
         return LoginResult(
             "private-session",
@@ -61,22 +73,6 @@ class Identity:
             self.principal,
             datetime.now(UTC) + timedelta(hours=8),
         )
-
-    async def execute_with_precondition(self, command, precondition):
-        self.guarded_calls.append(command)
-        self.commands.append(command)
-        await precondition(Sessions(self.principal, self.csrf_valid), Tokens())
-        self.executed.append(command)
-        return self._result(command)
-
-    async def query_with_precondition(self, query, precondition):
-        self.guarded_calls.append(query)
-        self.queries.append(query)
-        await precondition(Sessions(self.principal, self.csrf_valid), Tokens())
-        self.executed.append(query)
-        if isinstance(query, ProfileQuery):
-            return AccountProfile(USER, "alice", None)
-        return ()
 
     def _result(self, message):
         if isinstance(message, SelectActiveProjectCommand | RotateCsrfCommand):
@@ -100,29 +96,16 @@ class Identity:
         return None
 
 
-class Sessions:
-    def __init__(self, principal, csrf_valid=True):
-        self.principal = principal
-        self.csrf_valid = csrf_valid
-
-    async def authorize_session_operation(self, *_args, **_kwargs):
-        return self.principal
-
-    async def validate_csrf(self, *_args):
-        return self.csrf_valid
-
-
-class Tokens:
-    async def lock_personal_token(self, _token_id, *, user_id=None):
-        return None
-
-
 class FakeSessionTokenVerifier:
     def verify(self, token: str) -> bool:
         return token == "private-session"
 
 
 class Bindings(Provider):
+    @provide(scope=Scope.REQUEST)
+    def credentials(self) -> RequestCredentials:
+        return RequestCredentials()
+
     def __init__(self, identity, session_token_verifier=None, authorizer=None):
         super().__init__()
         self.identity = identity
@@ -146,14 +129,6 @@ class Bindings(Provider):
     @provide(scope=Scope.APP)
     def session_tokens(self) -> SessionTokenVerifier:
         return self.session_token_verifier
-
-    @provide(scope=Scope.APP)
-    def token_hasher(self) -> TokenHasher:
-        class Hasher:
-            def digest(self, token: str) -> str:
-                return token
-
-        return Hasher()
 
 
 def test_protected_http_reads_and_writes_use_guarded_dispatch():

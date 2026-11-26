@@ -57,10 +57,10 @@ services:
   opa:
     image: openpolicyagent/opa:1.0.1-static
     command: ["run", "--server", "--addr=0.0.0.0:8181", "/policies"]
-    volumes: [./backend/src/identity/infra/authorization/policies:/policies:ro]
+    volumes: [./ops/policies:/policies:ro]
     networks: [control]
     healthcheck:
-      test: ["CMD", "/opa", "eval", "--fail", "--data", "/policies", "data.devops.identity.decision.policy_revision == \"identity-v1\""]
+      test: ["CMD", "/opa", "eval", "--fail", "--data", "/policies", "data.devops.authorization.decision.policy_revision == \"authorization-v1\""]
       interval: 10s
       timeout: 3s
       retries: 5

@@ -16,6 +16,7 @@ from api.identity.authentication.credentials import (
 )
 from api.settings.config import BrowserCookiePolicy
 from identity.application.interfaces.session_tokens import SessionTokenVerifier
+from shared.authorization.credentials import RequestCredentials
 
 type RequestIdentity = str | BrowserCredentials | None
 bearer = HTTPBearer(auto_error=False)
@@ -27,6 +28,7 @@ async def request_identity(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
     session_tokens: FromDishka[SessionTokenVerifier],
     cookie_policy: FromDishka[BrowserCookiePolicy],
+    request_credentials: FromDishka[RequestCredentials],
 ) -> RequestIdentity:
     browser = browser_credentials(request)
     require_valid_browser_session(browser, session_tokens)
@@ -36,7 +38,7 @@ async def request_identity(
         identity: RequestIdentity = browser
     else:
         identity = credentials.credentials if credentials is not None else None
-    request.state.request_identity = identity
+    request_credentials.identity = identity
     return identity
 
 
@@ -45,6 +47,7 @@ async def browser_request_identity(
     request: Request,
     session_tokens: FromDishka[SessionTokenVerifier],
     cookie_policy: FromDishka[BrowserCookiePolicy],
+    request_credentials: FromDishka[RequestCredentials],
 ) -> BrowserCredentials:
     """Cookie-only authentication for browser routes with no bearer security scheme."""
     credentials = browser_credentials(request)
@@ -52,5 +55,5 @@ async def browser_request_identity(
     require_valid_browser_session(credentials, session_tokens)
     if credentials.mutate:
         require_browser_origin(request, cookie_policy.allowed_origins)
-    request.state.request_identity = credentials
+    request_credentials.identity = credentials
     return credentials

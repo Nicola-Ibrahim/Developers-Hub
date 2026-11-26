@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from composition.integrations.application_resources import LedgerApplicationResources
 from composition.integrations.first_admin_unit_of_work import FirstAdminUnitOfWork
+from composition.integrations.platform_authorization import DeveloperPlatformModule
 from composition.integrations.project_access_persistence import (
     api_token_repository_for_session,
     identity_project_access_for_session,
@@ -12,6 +13,7 @@ from composition.integrations.project_access_persistence import (
     project_access_repository_for_session,
 )
 from composition.integrations.project_registration import RegisterProjectCommandHandler
+from devops_platform.application.interfaces.module import DeveloperPlatformModule as PlatformModule
 from devops_platform.application.interfaces.project_access import ProjectAccessRepository
 from devops_platform.application.interfaces.software_delivery import ResourceProvisioner
 from devops_platform.application.projects.handler import RegisterProjectHandler
@@ -31,6 +33,8 @@ from shared.infra.settings import Settings
 
 class CrossContextIntegrationProvider(Provider):
     """Bind adapters that coordinate identity and developer-platform capabilities."""
+
+    platform = provide(DeveloperPlatformModule, provides=PlatformModule, scope=Scope.REQUEST)
 
     @provide(scope=Scope.REQUEST, provides=ProjectAccessRepository)
     def project_access_repository(self, session: AsyncSession) -> ProjectAccessRepository:

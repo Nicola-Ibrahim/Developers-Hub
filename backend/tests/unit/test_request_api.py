@@ -49,6 +49,7 @@ from identity.application.interfaces.session_tokens import SessionTokenVerifier
 from identity.contracts import AuthenticatedPrincipal
 from identity.domain.errors import AuthenticationRejected
 from identity.domain.records import MembershipDetails, SessionPrincipal
+from shared.authorization.credentials import RequestCredentials
 from shared.authorization.interfaces import AuthorizationDecisionPort
 from shared.authorization.models import AuthorizationDecision
 
@@ -210,6 +211,10 @@ class FakeIdentityModule:
 
 
 class ApiOnlyPlatformProvider(Provider):
+    @provide(scope=Scope.REQUEST)
+    def credentials(self) -> RequestCredentials:
+        return RequestCredentials()
+
     def __init__(self, queries: FakePlatformQueries) -> None:
         super().__init__()
         self.queries = queries
