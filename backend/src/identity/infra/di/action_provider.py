@@ -5,10 +5,8 @@ from typing import Annotated
 from dishka import FromComponent, Provider, Scope, alias, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from identity.application.api_tokens.manage_personal_tokens import (
-    CreatePersonalTokenHandler,
-    RotatePersonalTokenHandler,
-)
+from identity.application.api_tokens.create_personal_token.handler import CreatePersonalTokenHandler
+from identity.application.api_tokens.rotate_personal_token.handler import RotatePersonalTokenHandler
 from identity.application.interfaces.security import TokenGenerator, TokenHasher
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.interfaces.project_access import IdentityProjectAccess

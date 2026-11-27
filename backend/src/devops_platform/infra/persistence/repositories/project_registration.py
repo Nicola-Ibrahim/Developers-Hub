@@ -7,7 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from devops_platform.application.interfaces.projects import ProjectRegistrationRepository
-from devops_platform.application.projects.command import RegisterProjectCommand
+from devops_platform.application.projects.register_project.command import RegisterProjectCommand
 from devops_platform.application.projects.result import (
     EnvironmentDetails,
     ProjectRegistrationDetails,

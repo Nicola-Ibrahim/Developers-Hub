@@ -7,8 +7,6 @@ from identity.application.interfaces.identity_transactions import IdentityTransa
 from identity.application.interfaces.security import PasswordHasher
 from identity.domain.interfaces.session_repository import SessionRepository
 from identity.domain.interfaces.user_repository import UserRepository
-from identity.domain.password_policy import validate_password
-from identity.domain.value_objects.user_name import UserName
 
 
 class CreateUserHandler:
@@ -17,11 +15,11 @@ class CreateUserHandler:
         self.passwords = passwords
 
     async def execute(self, command: CreateUserCommand) -> UUID:
-        name = UserName.parse(command.user_name).value
-        validate_password(command.password)
         encoded = await asyncio.to_thread(self.passwords.hash, command.password)
 
         async def create(users: UserRepository, _sessions: SessionRepository) -> UUID:
-            return await users.create_user(name, encoded, command.actor_id, datetime.now(UTC))
+            return await users.create_user(
+                command.user_name, encoded, command.actor_id, datetime.now(UTC)
+            )
 
         return await self.transaction.run(create)

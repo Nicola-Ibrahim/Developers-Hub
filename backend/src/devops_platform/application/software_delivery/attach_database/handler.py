@@ -4,16 +4,10 @@ from devops_platform.application.interfaces.software_delivery import (
     ApplicationResourceAttachmentRepository,
     RequestFingerprint,
 )
-from devops_platform.application.shared.errors import PlatformRequestError
 from devops_platform.application.software_delivery.attach_database.command import (
     AttachDatabase,
 )
 from devops_platform.application.software_delivery.shared.models import DeliveryStepDetails
-from devops_platform.application.software_delivery.shared.policy import (
-    validate_delivery_key,
-)
-from devops_platform.domain.errors import DomainError
-from devops_platform.domain.value_objects.resource_spec import ResourceSpec
 
 
 class AttachApplicationResourceHandler:
@@ -26,21 +20,6 @@ class AttachApplicationResourceHandler:
 
     async def execute(self, message: AttachDatabase) -> DeliveryStepDetails:
         access, application_id, command = message.access, message.application_id, message.request
-        validate_delivery_key(message.idempotency_key)
-        try:
-            ResourceSpec(
-                command.template_id,
-                command.version,
-                command.target_id,
-                command.size_id,
-                max_lifetime_seconds=86400,
-            )
-        except DomainError as error:
-            raise PlatformRequestError(
-                "invalid_resource", "Resource request is invalid", 422
-            ) from error
-        if command.ttl_seconds < 60 or command.ttl_seconds > 86400:
-            raise PlatformRequestError("invalid_lease", "Resource lifetime is outside policy", 422)
         return await self.repository.enqueue_resource_attachment(
             access,
             application_id,

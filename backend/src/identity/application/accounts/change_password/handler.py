@@ -10,7 +10,6 @@ from identity.application.interfaces.identity_transactions import IdentityTransa
 from identity.application.interfaces.security import PasswordHasher
 from identity.domain.interfaces.session_repository import SessionRepository
 from identity.domain.interfaces.user_repository import UserRepository
-from identity.domain.password_policy import validate_password
 from identity.domain.records import AccountCredentials
 from identity.domain.session_errors import SessionAuthenticationRejected
 
@@ -24,19 +23,18 @@ class PreparedPasswordChange:
 async def verify_password_change(
     passwords: PasswordHasher,
     account: AccountCredentials | None,
-    current_password: str,
-    new_password: str,
+    command: ChangePasswordCommand,
 ) -> PreparedPasswordChange:
     if account is None or not await asyncio.to_thread(
         passwords.verify,
-        current_password,
-        account.password_hash if account is not None else "",
+        command.current_password,
+        account.password_hash,
     ):
         raise SessionAuthenticationRejected()
-    validate_password(new_password)
+    command.validate_new_password()
     return PreparedPasswordChange(
         account.credential_version,
-        await asyncio.to_thread(passwords.hash, new_password),
+        await asyncio.to_thread(passwords.hash, command.new_password),
     )
 
 
@@ -60,9 +58,7 @@ class ChangePasswordHandler:
         account = await self.transaction.run(load_account)
         if account is None or account.user_id != command.actor_id:
             raise SessionAuthenticationRejected()
-        prepared = await verify_password_change(
-            self.passwords, account, command.current_password, command.new_password
-        )
+        prepared = await verify_password_change(self.passwords, account, command)
 
         async def update_password(users: UserRepository, sessions: SessionRepository) -> None:
             now = datetime.now(UTC)

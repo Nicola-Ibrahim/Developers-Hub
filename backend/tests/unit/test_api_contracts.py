@@ -265,7 +265,7 @@ def test_http_transport_works_with_fake_application_ports():
         async def query(self, message):
             assert isinstance(message, AuthenticateApiTokenQuery)
             return await AuthenticateApiTokenHandler(Transaction(), Hasher()).execute(
-                AuthenticateApiTokenQuery(message.token)
+                AuthenticateApiTokenQuery(token=message.token)
             )
 
     class FakePlatformModule:

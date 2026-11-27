@@ -27,7 +27,9 @@ async def authenticated_identity(
     credentials: Annotated[BrowserCredentials, Depends(browser_request_identity)],
 ) -> None:
     principal = await module.query(
-        AuthenticateSessionQuery(require_cookie_session(credentials), credentials.project_id)
+        AuthenticateSessionQuery(
+            session_token=require_cookie_session(credentials), project_id=credentials.project_id
+        )
     )
     request.state.identity_principal = principal
 

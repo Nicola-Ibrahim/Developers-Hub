@@ -18,14 +18,14 @@ from sqlalchemy.pool import NullPool
 from api.app import create_app
 from api.core.errors import APIError
 from backend import BackendContainer
-from devops_platform.application.projects.command import RegisterProjectCommand
+from devops_platform.application.projects.register_project.command import RegisterProjectCommand
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
 from devops_platform.infra.persistence.models.resources import Resource
 from devops_platform.infra.persistence.repositories.project_access import (
     SQLAlchemyProjectAccessRules,
 )
 from devops_platform.infra.project_registration import RegisterProjectCommandHandler
-from identity.application.api_tokens.personal_token_messages import CreatePersonalTokenCommand
+from identity.application.api_tokens.create_personal_token.command import CreatePersonalTokenCommand
 from identity.application.api_tokens.revoke_api_token.command import RevokeApiTokenCommand
 from identity.application.api_tokens.revoke_api_token.handler import RevokeApiTokenHandler
 from identity.application.interfaces.dispatch import IdentityModule
@@ -92,11 +92,11 @@ async def issue_with_container(
                 credentials,
                 SessionCredentials(session_token, csrf_token=csrf_token),
                 CreatePersonalTokenCommand(
-                    actor_id,
-                    project_id,
-                    "integration",
-                    kwargs.get("scopes", ("catalog:read",)),
-                    kwargs.get("hours", 24),
+                    actor_id=actor_id,
+                    project_id=project_id,
+                    name="integration",
+                    scopes=kwargs.get("scopes", ("catalog:read",)),
+                    hours=kwargs.get("hours", 24),
                 ),
             )
             return token.token_id, secret
@@ -185,7 +185,7 @@ async def revoke_with_container(database: AsyncEngine, token_id, config):
     try:
         async with container() as scope:
             service = await scope.get(RevokeApiTokenHandler)
-            return await service.execute(RevokeApiTokenCommand(token_id))
+            return await service.execute(RevokeApiTokenCommand(token_id=token_id))
     finally:
         await container.close()
 
@@ -556,12 +556,14 @@ def test_concurrent_token_revocation_preserves_first_timestamp_and_single_audit(
         tasks = []
         try:
             first_handler = RevokeApiTokenHandler(PausingTransaction())
-            first_task = asyncio.create_task(first_handler.execute(RevokeApiTokenCommand(token_id)))
+            first_task = asyncio.create_task(
+                first_handler.execute(RevokeApiTokenCommand(token_id=token_id))
+            )
             tasks.append(first_task)
             await asyncio.wait_for(first_token_locked.wait(), timeout=10)
             second_handler = RevokeApiTokenHandler(ObservedTransaction())
             second_task = asyncio.create_task(
-                second_handler.execute(RevokeApiTokenCommand(token_id))
+                second_handler.execute(RevokeApiTokenCommand(token_id=token_id))
             )
             tasks.append(second_task)
             await wait_until_second_is_blocked()

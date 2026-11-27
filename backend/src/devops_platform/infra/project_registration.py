@@ -2,10 +2,9 @@
 
 from collections.abc import Awaitable, Callable
 
-from devops_platform.application.projects.command import RegisterProjectCommand
-from devops_platform.application.projects.handler import (
+from devops_platform.application.projects.register_project.command import RegisterProjectCommand
+from devops_platform.application.projects.register_project.handler import (
     RegisterProjectHandler,
-    validate_registration,
 )
 from devops_platform.application.projects.result import ProjectRegistrationDetails
 from devops_platform.application.shared.errors import ledger_unavailable
@@ -26,8 +25,6 @@ class RegisterProjectCommandHandler:
         self.unit = unit
 
     async def execute(self, command: RegisterProjectCommand) -> ProjectRegistrationDetails:
-        validate_registration(command)
-
         async def register() -> ProjectRegistrationDetails:
             refs = await self.directory.register_references(command.name, command.owning_team)
             return await self.register.execute(command, refs.project_id, refs.team_id)

@@ -11,11 +11,9 @@ from test_foundation_postgres import async_engine_for, dispatch_browser
 
 from backend import BackendContainer
 from devops_platform.infra.persistence.models.project_access import ProjectMembershipRow, ProjectRow
-from identity.application.api_tokens.personal_token_messages import (
-    CreatePersonalTokenCommand,
-    ListPersonalTokensQuery,
-    RotatePersonalTokenCommand,
-)
+from identity.application.api_tokens.create_personal_token.command import CreatePersonalTokenCommand
+from identity.application.api_tokens.list_personal_tokens.query import ListPersonalTokensQuery
+from identity.application.api_tokens.rotate_personal_token.command import RotatePersonalTokenCommand
 from identity.application.interfaces.dispatch import IdentityModule
 from identity.domain.session_errors import SessionAuthenticationRejected
 from identity.infra.persistence.models.api_token import ApiAccessTokenRow
@@ -97,13 +95,21 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
             identity.execute,
             credentials,
             first_credentials(),
-            CreatePersonalTokenCommand(user_id, project_a, "a", ("catalog:read",), 1),
+            CreatePersonalTokenCommand(
+                actor_id=user_id, project_id=project_a, name="a", scopes=("catalog:read",), hours=1
+            ),
         )
         created_b, _ = await dispatch_browser(
             identity.execute,
             credentials,
             second_credentials(),
-            CreatePersonalTokenCommand(user_id, project_b, "b", ("resources:read",), 8),
+            CreatePersonalTokenCommand(
+                actor_id=user_id,
+                project_id=project_b,
+                name="b",
+                scopes=("resources:read",),
+                hours=8,
+            ),
         )
         assert [
             item.token_id
@@ -111,7 +117,7 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
                 identity.query,
                 credentials,
                 SessionCredentials(first_session),
-                ListPersonalTokensQuery(user_id, project_a),
+                ListPersonalTokensQuery(actor_id=user_id, project_id=project_a),
             )
         ] == [created_a.token_id]
         assert [
@@ -120,7 +126,7 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
                 identity.query,
                 credentials,
                 SessionCredentials(second_session),
-                ListPersonalTokensQuery(user_id, project_b),
+                ListPersonalTokensQuery(actor_id=user_id, project_id=project_b),
             )
         ] == [created_b.token_id]
         assert (
@@ -128,7 +134,7 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
                 identity.query,
                 credentials,
                 SessionCredentials(outsider_session),
-                ListPersonalTokensQuery(other_user, project_a),
+                ListPersonalTokensQuery(actor_id=other_user, project_id=project_a),
             )
             == ()
         )
@@ -137,7 +143,7 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
             identity.execute,
             credentials,
             first_credentials(),
-            RotatePersonalTokenCommand(user_id, created_a.token_id),
+            RotatePersonalTokenCommand(actor_id=user_id, token_id=created_a.token_id),
         )
         assert secret
         assert rotated.token_id != created_a.token_id
@@ -167,14 +173,20 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
                 identity.execute,
                 credentials,
                 first_credentials(),
-                RotatePersonalTokenCommand(user_id, rotated.token_id),
+                RotatePersonalTokenCommand(actor_id=user_id, token_id=rotated.token_id),
             )
         with pytest.raises(SessionAuthenticationRejected):
             await dispatch_browser(
                 identity.execute,
                 credentials,
                 second_credentials(),
-                CreatePersonalTokenCommand(user_id, project_b, "stale", ("resources:read",), 8),
+                CreatePersonalTokenCommand(
+                    actor_id=user_id,
+                    project_id=project_b,
+                    name="stale",
+                    scopes=("resources:read",),
+                    hours=8,
+                ),
             )
         with Session(postgres_engine) as session:
             preserved = session.get(ApiAccessTokenRow, rotated.token_id)
@@ -183,7 +195,7 @@ def test_personal_tokens_use_one_action_session_and_preserve_scope_project_and_e
             identity.query,
             credentials,
             SessionCredentials(second_session),
-            ListPersonalTokensQuery(user_id, project_b),
+            ListPersonalTokensQuery(actor_id=user_id, project_id=project_b),
         ) == (created_b,)
 
     async def exercise():

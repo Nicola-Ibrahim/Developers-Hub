@@ -19,7 +19,7 @@ Access = Annotated[AccessContext, Depends(platform_access)]
 @router.get("/catalog", response_model=CatalogResponse, tags=["catalog"])
 @inject
 async def catalog(access: Access, module: FromDishka[DeveloperPlatformModule]) -> CatalogResponse:
-    message = ReadCatalog(access)
+    message = ReadCatalog(access=access)
     result = await module.query(message)
     return CatalogResponse(
         project_id=result.project_id,

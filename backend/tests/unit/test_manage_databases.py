@@ -30,7 +30,7 @@ def test_connection_handler_requires_cipher_before_sensitive_read():
     with pytest.raises(PlatformRequestError) as error:
         asyncio.run(
             GetDatabaseConnectionQueryHandler(Repository(), None).execute(
-                ReadDatabaseConnection(allowed, resource_id)
+                ReadDatabaseConnection(access=allowed, resource_id=resource_id)
             )
         )
     assert error.value.code == "credentials_unavailable"
@@ -58,7 +58,7 @@ def test_connection_encodes_credential_components_without_exposing_repr():
     access = AccessContext(user_id, project_id, "developer", frozenset({"connections:read"}))
     result = asyncio.run(
         GetDatabaseConnectionQueryHandler(Repository(), Cipher()).execute(
-            ReadDatabaseConnection(access, resource_id)
+            ReadDatabaseConnection(access=access, resource_id=resource_id)
         )
     )
     assert result.connection_string == ("postgresql://user%40name:pass%3Aword@[::1]:5432/db%2Fname")

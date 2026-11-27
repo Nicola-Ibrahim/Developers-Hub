@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from uuid import UUID
 
-from devops_platform.application.projects.command import RegisterProjectCommand
+from devops_platform.application.projects.register_project.command import RegisterProjectCommand
 from devops_platform.application.projects.result import ProjectRegistrationDetails
 
 

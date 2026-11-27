@@ -56,7 +56,7 @@ def test_create_internal_user_handler_builds_normalized_domain_name() -> None:
     repository = Repository()
     asyncio.run(
         CreateUserHandler(Transaction(repository), Passwords()).execute(
-            CreateUserCommand(" Developer ", "long-enough-password")
+            CreateUserCommand(user_name=" Developer ", password="long-enough-password")
         )
     )
 
@@ -73,11 +73,13 @@ def test_membership_command_validates_project_role_before_persistence() -> None:
         asyncio.run(
             ManageProjectMembershipHandler(Repository()).execute(
                 ManageProjectMembership(
-                    AccessContext(actor_id, project_id, "admin", frozenset({"resources:write"})),
-                    project_id,
-                    uuid4(),
-                    "owner",
-                    NOW,
+                    access=AccessContext(
+                        actor_id, project_id, "admin", frozenset({"resources:write"})
+                    ),
+                    project_id=project_id,
+                    user_id=uuid4(),
+                    role="owner",
+                    now=NOW,
                 )
             )
         )
@@ -95,8 +97,8 @@ def test_project_member_query_is_read_only_and_project_scoped() -> None:
     result = asyncio.run(
         ListProjectMembersHandler(repository).execute(
             ListProjectMembers(
-                AccessContext(actor_id, project_id, "admin", frozenset({"resources:read"})),
-                project_id,
+                access=AccessContext(actor_id, project_id, "admin", frozenset({"resources:read"})),
+                project_id=project_id,
             )
         )
     )
@@ -126,7 +128,7 @@ def test_session_refresh_is_explicitly_a_command(monkeypatch) -> None:
     result = asyncio.run(
         AuthenticateSessionHandler(
             repository, SimpleNamespace(digest=lambda value: f"digest:{value}")
-        ).execute(AuthenticateSessionQuery("private-session"))
+        ).execute(AuthenticateSessionQuery(session_token="private-session"))
     )
 
     assert result == principal
@@ -135,4 +137,4 @@ def test_session_refresh_is_explicitly_a_command(monkeypatch) -> None:
         "project_id": None,
         "now": NOW,
     }
-    assert "private-session" not in repr(AuthenticateSessionQuery("private-session"))
+    assert "private-session" not in repr(AuthenticateSessionQuery(session_token="private-session"))

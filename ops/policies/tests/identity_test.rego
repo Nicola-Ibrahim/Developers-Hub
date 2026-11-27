@@ -3,7 +3,7 @@ package devops.identity
 test_profile_owner_allowed if {
 	allow with input as {
 		"subject": {"id": "user-a"},
-		"action": "identity.application.profile.profile_query.ProfileQuery",
+		"action": "identity.application.profile.read_profile.query.ProfileQuery",
 		"resource": {"kind": "profile", "owner_id": "user-a"},
 	}
 }
@@ -11,7 +11,7 @@ test_profile_owner_allowed if {
 test_profile_other_owner_denied if {
 	not allow with input as {
 		"subject": {"id": "user-a"},
-		"action": "identity.application.profile.profile_query.ProfileQuery",
+		"action": "identity.application.profile.read_profile.query.ProfileQuery",
 		"resource": {"kind": "profile", "owner_id": "user-b"},
 	}
 }
@@ -35,7 +35,7 @@ test_session_other_owner_denied if {
 test_token_other_owner_denied if {
 	not allow with input as {
 		"subject": {"id": "user-a"},
-		"action": "identity.application.api_tokens.personal_token_messages.RotatePersonalTokenCommand",
+		"action": "identity.application.api_tokens.rotate_personal_token.command.RotatePersonalTokenCommand",
 		"resource": {"kind": "token", "owner_id": "user-b"},
 	}
 }

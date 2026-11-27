@@ -1,6 +1,6 @@
 import asyncio
 import re
-from dataclasses import MISSING, dataclass, fields
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,9 +12,29 @@ from dishka import Scope
 from dishka.exceptions import NoFactoryError
 
 from backend import BackendContainer
+from devops_platform.application.applications.create_application.command import (
+    ApplicationRegistration,
+    CreateApplication,
+)
 from devops_platform.application.projects.list_projects.query import ReadProjects
+from devops_platform.application.resource_management.submit_database_request.command import (
+    DatabaseRequest,
+    RequestTemporaryDatabase,
+)
 from devops_platform.application.shared.dto import AccessContext
 from devops_platform.application.shared.errors import CatalogForbidden, PlatformRequestError
+from devops_platform.application.software_delivery.attach_database.command import (
+    AttachDatabase,
+    ResourceAttachmentSpec,
+)
+from devops_platform.application.software_delivery.create_local_preview.command import (
+    CreateLocalPreview,
+    LocalPreviewRegistration,
+)
+from devops_platform.application.software_delivery.deploy_application.command import (
+    DeployApplication,
+    DeploymentSpec,
+)
 from devops_platform.infra.handlers import PLATFORM_HANDLER_REGISTRY
 from devops_platform.infra.module import DeveloperPlatformModule
 from identity.application.interfaces.security import TokenHasher
@@ -190,22 +210,50 @@ def test_all_protected_operations_stop_at_the_policy_boundary(
         (MembershipDetails(project_id, "project", "admin"),),
         "",
     )
+    requests = {
+        RequestTemporaryDatabase: DatabaseRequest(
+            project_id, object_id, "test-db", "postgres", "16", "local", "small", 3600
+        ),
+        CreateApplication: ApplicationRegistration(
+            object_id, "test-app", "python-fastapi", "1.0.0"
+        ),
+        CreateLocalPreview: LocalPreviewRegistration("test-preview", object_id, 3600),
+        AttachDatabase: ResourceAttachmentSpec("postgres", "16", "local", "small", 3600),
+        DeployApplication: DeploymentSpec("sha256:" + "a" * 64),
+    }
+    now = datetime.now(UTC)
     inputs = {
         "access": access,
         "accesses": () if empty_projects else (access,),
         "user_id": actor_id if message_type is ReadProjects else object_id,
         "actor_id": actor_id,
+        "actor_name": "test-actor",
+        "current_password": "test-current-password",
+        "new_password": "test-replacement-password",
         "session_token": "session",
         "project_id": project_id,
-        "request": SimpleNamespace(project_id=project_id),
-        "now": datetime.now(UTC),
+        "request": requests.get(message_type),
+        "now": now,
+        "expires_at": now,
+        "name": "test-token",
+        "scopes": tuple(scopes),
+        "hours": 1,
+        "idempotency_key": "test-operation",
+        "expected_revision": 1,
+        "limit": 25,
+        "raw_body": b"{}",
+        "signature": None,
+        "delivery_id": "ab01-2345-6789-0123",
+        "event": "pull_request",
+        "display_name": None,
+        "role": "admin",
     }
-    # Populate boundary inputs. Business-only payloads are never read on a denial.
+    # Construct valid messages so every outcome reaches the authorization boundary.
     message = message_type(
         **{
-            field.name: inputs.get(field.name, object_id if field.name.endswith("_id") else None)
-            for field in fields(message_type)
-            if field.default is MISSING and field.default_factory is MISSING
+            name: inputs.get(name, object_id if name.endswith("_id") else None)
+            for name, field in message_type.model_fields.items()
+            if field.is_required()
         }
     )
     calls = []

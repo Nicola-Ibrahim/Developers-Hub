@@ -4,7 +4,6 @@ from identity.application.api_tokens.authenticate_api_token.query import Authent
 from identity.application.interfaces.security import TokenHasher
 from identity.application.interfaces.token_operations import ApiTokenTransaction
 from identity.domain.aggregates.api_token import AuthenticatedPrincipal
-from identity.domain.errors import AuthenticationRejected
 from identity.domain.interfaces.api_token_repository import ApiTokenRepository
 from identity.domain.services.token_authentication import authenticate_api_token_credentials
 
@@ -28,8 +27,5 @@ async def authenticate_api_token(
     hasher: TokenHasher,
     now: datetime,
 ) -> AuthenticatedPrincipal:
-    token = query.token
-    if token is None or not 32 <= len(token) <= 256:
-        raise AuthenticationRejected()
-    snapshot = await repository.find_token_credential(hasher.digest(token))
+    snapshot = await repository.find_token_credential(hasher.digest(query.require_token()))
     return authenticate_api_token_credentials(snapshot, now)

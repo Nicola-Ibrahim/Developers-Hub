@@ -12,9 +12,6 @@ from devops_platform.application.resource_management.submit_database_request.com
 from devops_platform.application.shared.errors import PlatformRequestError
 from devops_platform.domain.aggregates.resource_lifecycle import ResourceLifecycle
 from devops_platform.domain.entities.operation import AcceptedResourceRequest
-from devops_platform.domain.errors import DomainError
-from devops_platform.domain.value_objects.idempotency_key import IdempotencyKey
-from devops_platform.domain.value_objects.resource_name import ResourceName
 from devops_platform.domain.value_objects.resource_spec import ResourceSpec
 
 
@@ -32,14 +29,8 @@ class RequestTemporaryDatabaseHandler:
         self.installation_id = installation_id
 
     async def execute(self, message: RequestTemporaryDatabase) -> AcceptedResourceRequest:
-        access, command, key = message.access, message.request, message.idempotency_key
-        try:
-            idempotency_key = IdempotencyKey(key)
-            name = ResourceName(command.display_name)
-        except DomainError as error:
-            raise PlatformRequestError(
-                "invalid_request", "Invalid request or idempotency key", 422
-            ) from error
+        access, command = message.access, message.request
+        idempotency_key = message.validated_key
         request_hash = self.fingerprint(command)
         replay = await self.repository.replay_request(access, idempotency_key, request_hash)
         if replay is not None:
@@ -55,7 +46,7 @@ class RequestTemporaryDatabaseHandler:
             environment_id=command.environment_id,
             owner_id=access.user_id,
             installation_id=self.installation_id,
-            name=name,
+            name=message.resource_name,
             specification=ResourceSpec(
                 command.template_id,
                 command.version,

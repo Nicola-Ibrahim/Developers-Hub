@@ -15,7 +15,6 @@ from identity.domain.interfaces.user_repository import UserRepository
 from identity.domain.records import AccountCredentials, SessionPrincipal
 from identity.domain.session_errors import SessionAuthenticationRejected
 from identity.domain.value_objects.session_expiry import SessionExpiry
-from identity.domain.value_objects.user_name import UserName
 
 
 class LoginHandler:
@@ -34,7 +33,7 @@ class LoginHandler:
         self.session_token_issuer = session_token_issuer
 
     async def execute(self, command: LoginCommand) -> LoginResult:
-        name = UserName.parse(command.user_name).value
+        name = command.user_name
 
         async def read_account(
             users: UserRepository, _sessions: SessionRepository

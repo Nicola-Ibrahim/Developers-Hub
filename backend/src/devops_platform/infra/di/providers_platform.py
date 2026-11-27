@@ -11,7 +11,7 @@ from devops_platform.application.interfaces.resources import (
 from devops_platform.application.project_access.bootstrap_first_admin.handler import (
     BootstrapFirstAdminHandler,
 )
-from devops_platform.application.projects.handler import RegisterProjectHandler
+from devops_platform.application.projects.register_project.handler import RegisterProjectHandler
 from devops_platform.application.resource_management.catalog.catalog import ApprovedPostgresCatalog
 from devops_platform.domain.interfaces.project_access_directory import ProjectAccessDirectory
 from devops_platform.infra.module import DeveloperPlatformModule

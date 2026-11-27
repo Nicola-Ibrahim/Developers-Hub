@@ -32,7 +32,11 @@ async def current_principal(
                 401, "authentication_rejected", "Credentials or browser session are invalid"
             )
         principal = await identity.query(
-            AuthenticateSessionQuery(session_token, credentials.project_id, csrf_token=csrf_token)
+            AuthenticateSessionQuery(
+                session_token=session_token,
+                project_id=credentials.project_id,
+                csrf_token=csrf_token,
+            )
         )
         if principal.project_id is None or principal.role not in {"developer", "admin"}:
             raise PlatformRequestError("project_required", "Select an authorized project", 409)
@@ -42,7 +46,7 @@ async def current_principal(
             role=cast(Literal["developer", "admin"], principal.role),
             scopes=list(principal.scopes),
         )
-    token_principal = await identity.query(AuthenticateApiTokenQuery(credentials))
+    token_principal = await identity.query(AuthenticateApiTokenQuery(token=credentials))
     return PrincipalView(
         user_id=token_principal.user_id,
         project_id=token_principal.project_id,

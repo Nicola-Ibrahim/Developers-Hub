@@ -158,7 +158,7 @@ def test_platform_dispatch_uses_same_session_for_unit_and_repository(monkeypatch
         try:
             async with container() as request_container:
                 host = await request_container.get(DeveloperPlatformModule)
-                return await host.query(ReadResource(trusted, uuid4()))
+                return await host.query(ReadResource(access=trusted, resource_id=uuid4()))
         finally:
             await container.close()
 
@@ -193,8 +193,8 @@ def test_platform_dispatch_creates_a_fresh_action_unit_for_each_call(monkeypatch
         try:
             async with container() as request_container:
                 host = await request_container.get(DeveloperPlatformModule)
-                first = await host.query(ReadResource(trusted, uuid4()))
-                second = await host.query(ReadResource(trusted, uuid4()))
+                first = await host.query(ReadResource(access=trusted, resource_id=uuid4()))
+                second = await host.query(ReadResource(access=trusted, resource_id=uuid4()))
                 return first, second
         finally:
             await container.close()

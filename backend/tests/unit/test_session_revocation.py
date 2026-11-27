@@ -7,7 +7,7 @@ from dishka import Provider, Scope, make_async_container, provide
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend import IdentityActionProvider as IdentityActionIntegrationProvider
-from identity.application.api_tokens.manage_personal_tokens import CreatePersonalTokenHandler
+from identity.application.api_tokens.create_personal_token.handler import CreatePersonalTokenHandler
 from identity.application.authentication.authenticate_session.handler import (
     AuthenticateSessionHandler,
 )
@@ -90,7 +90,9 @@ def test_revoke_handler_authorizes_and_persists_for_dispatch_transaction(monkeyp
     monkeypatch.setattr(revoke_session_module, "datetime", FixedDateTime)
     handler = RevokeSessionHandler(repository)
 
-    assert asyncio.run(handler.execute(RevokeSessionCommand(user_id, session_id)))
+    assert asyncio.run(
+        handler.execute(RevokeSessionCommand(actor_id=user_id, session_id=session_id))
+    )
     assert repository.saved.revoked_at == now
 
 
@@ -129,8 +131,8 @@ def test_logout_and_revoke_all_write_using_prevalidated_session_context(monkeypa
     revoke_all = RevokeAllSessionsHandler(repository)
 
     async def verify() -> None:
-        assert await logout.execute(LogoutCommand("session")) is None
-        assert await revoke_all.execute(RevokeAllSessionsCommand(user_id)) == 3
+        assert await logout.execute(LogoutCommand(session_token="session")) is None
+        assert await revoke_all.execute(RevokeAllSessionsCommand(actor_id=user_id)) == 3
 
     asyncio.run(verify())
     assert calls == [

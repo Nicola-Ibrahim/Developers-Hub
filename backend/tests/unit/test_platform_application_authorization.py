@@ -16,7 +16,7 @@ def test_catalog_handler_returns_catalog_without_rechecking_transport_scope() ->
         scopes=frozenset(),
     )
 
-    result = asyncio.run(ReadCatalogQueryHandler().execute(ReadCatalog(access)))
+    result = asyncio.run(ReadCatalogQueryHandler().execute(ReadCatalog(access=access)))
 
     assert result.project_id == access.project_id
     assert result.templates

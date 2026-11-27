@@ -11,20 +11,19 @@ from identity.application.api_tokens.authenticate_api_token.handler import (
     AuthenticateApiTokenHandler,
 )
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
-from identity.application.api_tokens.personal_token_messages import (
-    CreatePersonalTokenCommand,
-    ListPersonalTokensQuery,
-    RevokePersonalTokenCommand,
-    RotatePersonalTokenCommand,
-)
+from identity.application.api_tokens.create_personal_token.command import CreatePersonalTokenCommand
+from identity.application.api_tokens.list_personal_tokens.query import ListPersonalTokensQuery
+from identity.application.api_tokens.revoke_personal_token.command import RevokePersonalTokenCommand
+from identity.application.api_tokens.rotate_personal_token.command import RotatePersonalTokenCommand
 from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.handler import LoginHandler
 from identity.application.authentication.logout.command import LogoutCommand
 from identity.application.authentication.logout.handler import LogoutHandler
 from identity.application.interfaces.security import TokenHasher
-from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery
-from identity.application.profile.update_profile import UpdateProfileCommand
+from identity.application.profile.read_profile.query import ProfileQuery
+from identity.application.profile.security_history.query import SecurityHistoryQuery
+from identity.application.profile.update_profile.command import UpdateProfileCommand
 from identity.application.sessions.list_sessions.query import ListSessionsQuery
 from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand
 from identity.application.sessions.revoke_all_sessions.handler import RevokeAllSessionsHandler
@@ -115,7 +114,7 @@ def test_identity_dispatch_resolves_only_selected_handler() -> None:
 
     async def run() -> None:
         dispatcher = IdentityModule(Container(), RequestCredentials())
-        command = LoginCommand("alice", "secret", None)
+        command = LoginCommand(user_name="alice", password="secret", project_id=None)
         assert await dispatcher.execute(command) == "alice"
         assert resolved == [LoginHandler]
         with pytest.raises(UnsupportedMessage, match="Unsupported query"):
@@ -191,7 +190,7 @@ def test_logout_dispatch_resolves_from_fresh_identity_action_scope() -> None:
     async def run() -> None:
         dispatcher = IdentityModule(Container(), credentials)
         for _ in range(2):
-            assert await dispatcher.execute(LogoutCommand("token")) is None
+            assert await dispatcher.execute(LogoutCommand(session_token="token")) is None
 
     asyncio.run(run())
     assert scopes == [Scope.ACTION, Scope.ACTION]
@@ -277,7 +276,7 @@ def test_dispatch_denies_before_handler_and_evaluates_policy_once(unavailable: b
 
     dispatcher = IdentityModule(Container(), credentials)
     with pytest.raises(AuthorizationUnavailable if unavailable else AuthorizationDenied):
-        asyncio.run(dispatcher.execute(LogoutCommand("token")))
+        asyncio.run(dispatcher.execute(LogoutCommand(session_token="token")))
     assert len(policy_calls) == 1
     assert policy_calls[0].action == (
         "identity.application.authentication.logout.command.LogoutCommand"
@@ -336,7 +335,7 @@ def test_bearer_query_uses_its_own_transaction_and_leaves_platform_unit_unused()
     )
 
     async def run() -> None:
-        principal = await operation.execute(AuthenticateApiTokenQuery("t" * 43))
+        principal = await operation.execute(AuthenticateApiTokenQuery(token="t" * 43))
         assert principal.role == "developer"
 
     asyncio.run(run())

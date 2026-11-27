@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from test_foundation_postgres import async_engine_for
 
-from devops_platform.application.projects.command import RegisterProjectCommand
+from devops_platform.application.projects.register_project.command import RegisterProjectCommand
 from devops_platform.application.resource_management.catalog.models import (
     PostgresOption,
     ResourceSize,
@@ -147,7 +147,9 @@ def lifecycle_for(user_id, project_id, environment_id, now, ttl_seconds=3600):
 def test_registration_is_idempotent_configurable_and_creates_only_project_quota(postgres_engine):
     user_id, project_id, team_id = seed_identity(postgres_engine)
     database = async_engine_for(postgres_engine)
-    registration = RegisterProjectCommand("demo", "platform", "org/demo", ("dev", "test"))
+    registration = RegisterProjectCommand(
+        name="demo", owning_team="platform", repository="org/demo", environments=("dev", "test")
+    )
     try:
         first = asyncio.run(register(database, registration, project_id, team_id))
         second = asyncio.run(register(database, registration, project_id, team_id))
@@ -157,7 +159,12 @@ def test_registration_is_idempotent_configurable_and_creates_only_project_quota(
             asyncio.run(
                 register(
                     database,
-                    RegisterProjectCommand("demo", "platform", "org/other", ("dev",)),
+                    RegisterProjectCommand(
+                        name="demo",
+                        owning_team="platform",
+                        repository="org/other",
+                        environments=("dev",),
+                    ),
                     project_id,
                     team_id,
                 )
@@ -189,7 +196,12 @@ def test_legacy_registration_can_be_configured_once(postgres_engine):
         result = asyncio.run(
             register(
                 database,
-                RegisterProjectCommand("demo", "platform", "org/demo", ("dev",)),
+                RegisterProjectCommand(
+                    name="demo",
+                    owning_team="platform",
+                    repository="org/demo",
+                    environments=("dev",),
+                ),
                 project_id,
                 team_id,
             )
@@ -217,7 +229,12 @@ def test_duplicate_requests_replay_and_concurrent_duplicates_allocate_once(postg
         registration = asyncio.run(
             register(
                 database,
-                RegisterProjectCommand("demo", "platform", "org/demo", ("dev",)),
+                RegisterProjectCommand(
+                    name="demo",
+                    owning_team="platform",
+                    repository="org/demo",
+                    environments=("dev",),
+                ),
                 project_id,
                 team_id,
             )
@@ -287,7 +304,12 @@ def test_quota_boundary_counts_unreleased_reservations_and_scopes_reads(postgres
             asyncio.run(
                 register(
                     database,
-                    RegisterProjectCommand(name, "platform", f"org/{name}", ("dev",)),
+                    RegisterProjectCommand(
+                        name=name,
+                        owning_team="platform",
+                        repository=f"org/{name}",
+                        environments=("dev",),
+                    ),
                     project,
                     team,
                 )
@@ -357,7 +379,12 @@ def test_concurrent_distinct_keys_respect_project_quota(postgres_engine):
         registration = asyncio.run(
             register(
                 database,
-                RegisterProjectCommand("demo", "platform", "org/demo", ("dev",)),
+                RegisterProjectCommand(
+                    name="demo",
+                    owning_team="platform",
+                    repository="org/demo",
+                    environments=("dev",),
+                ),
                 project_id,
                 team_id,
             )
@@ -419,7 +446,12 @@ def test_concurrent_projects_respect_shared_target_quota(postgres_engine):
             asyncio.run(
                 register(
                     database,
-                    RegisterProjectCommand(name, "platform", f"org/{name}", ("dev",)),
+                    RegisterProjectCommand(
+                        name=name,
+                        owning_team="platform",
+                        repository=f"org/{name}",
+                        environments=("dev",),
+                    ),
                     project,
                     team,
                 )
@@ -481,7 +513,12 @@ def test_lease_starts_after_quota_lock_wait(postgres_engine):
         registration = asyncio.run(
             register(
                 database,
-                RegisterProjectCommand("demo", "platform", "org/demo", ("dev",)),
+                RegisterProjectCommand(
+                    name="demo",
+                    owning_team="platform",
+                    repository="org/demo",
+                    environments=("dev",),
+                ),
                 project_id,
                 team_id,
             )
@@ -578,7 +615,12 @@ def test_acceptance_rolls_back_all_ledger_rows_with_outer_transaction(postgres_e
         registration = asyncio.run(
             register(
                 database,
-                RegisterProjectCommand("demo", "platform", "org/demo", ("dev",)),
+                RegisterProjectCommand(
+                    name="demo",
+                    owning_team="platform",
+                    repository="org/demo",
+                    environments=("dev",),
+                ),
                 project_id,
                 team_id,
             )
@@ -616,7 +658,12 @@ def test_request_requires_registered_environment_and_target_quota(postgres_engin
         registration = asyncio.run(
             register(
                 database,
-                RegisterProjectCommand("demo", "platform", "org/demo", ("dev",)),
+                RegisterProjectCommand(
+                    name="demo",
+                    owning_team="platform",
+                    repository="org/demo",
+                    environments=("dev",),
+                ),
                 project_id,
                 team_id,
             )

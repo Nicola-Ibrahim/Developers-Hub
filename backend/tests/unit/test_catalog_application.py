@@ -21,7 +21,7 @@ class ReadCatalogTests(unittest.TestCase):
         )
 
     def test_returns_disabled_option_for_authorized_project(self) -> None:
-        result = asyncio.run(ReadCatalogQueryHandler().execute(ReadCatalog(self.access)))
+        result = asyncio.run(ReadCatalogQueryHandler().execute(ReadCatalog(access=self.access)))
 
         self.assertEqual(result.project_id, self.project_id)
         self.assertEqual(len(result.templates), 1)
@@ -47,6 +47,6 @@ class ReadCatalogTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            asyncio.run(ReadCatalogQueryHandler().execute(ReadCatalog(access))).project_id,
+            asyncio.run(ReadCatalogQueryHandler().execute(ReadCatalog(access=access))).project_id,
             other_project,
         )

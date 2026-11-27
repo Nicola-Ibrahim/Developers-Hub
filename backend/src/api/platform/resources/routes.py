@@ -60,7 +60,10 @@ async def request_database(
     ],
 ) -> AcceptedOperation:
     message = RequestTemporaryDatabase(
-        access, DatabaseRequest(**command.model_dump()), idempotency_key, datetime.now(UTC)
+        access=access,
+        request=DatabaseRequest(**command.model_dump()),
+        idempotency_key=idempotency_key,
+        now=datetime.now(UTC),
     )
     result = await module.execute(message)
     response.headers["Location"] = f"/api/v1/operations/{result.operation_id}"
@@ -76,7 +79,7 @@ async def resources(
     after: UUID | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> ResourcePage:
-    message = ReadResources(access, project_id, after, limit)
+    message = ReadResources(access=access, project_id=project_id, after=after, limit=limit)
     results = await module.query(message)
     return ResourcePage(
         items=[ResourceView.model_validate(asdict(item)) for item in results],
@@ -89,7 +92,7 @@ async def resources(
 async def resource(
     resource_id: UUID, access: Access, module: FromDishka[DeveloperPlatformModule]
 ) -> ResourceView:
-    message = ReadResource(access, resource_id)
+    message = ReadResource(access=access, resource_id=resource_id)
     result = await module.query(message)
     return ResourceView.model_validate(asdict(result))
 
@@ -102,7 +105,12 @@ async def renew(
     access: Access,
     module: FromDishka[DeveloperPlatformModule],
 ) -> ResourceView:
-    message = RenewDatabase(access, resource_id, command.expected_revision, command.expires_at)
+    message = RenewDatabase(
+        access=access,
+        resource_id=resource_id,
+        expected_revision=command.expected_revision,
+        expires_at=command.expires_at,
+    )
     row = await module.execute(message)
     return ResourceView.model_validate(asdict(row))
 
@@ -117,7 +125,7 @@ async def renew(
 async def delete_resource(
     resource_id: UUID, access: Access, module: FromDishka[DeveloperPlatformModule]
 ) -> AcceptedOperation:
-    message = DeleteDatabase(access, resource_id)
+    message = DeleteDatabase(access=access, resource_id=resource_id)
     operation_id = await module.execute(message)
     return AcceptedOperation(resource_id=resource_id, operation_id=operation_id)
 
@@ -129,7 +137,7 @@ async def delete_resource(
 async def connection(
     resource_id: UUID, access: Access, module: FromDishka[DeveloperPlatformModule]
 ) -> ConnectionView:
-    message = ReadDatabaseConnection(access, resource_id)
+    message = ReadDatabaseConnection(access=access, resource_id=resource_id)
     result = await module.query(message)
     return ConnectionView.model_validate(asdict(result))
 
@@ -139,6 +147,6 @@ async def connection(
 async def activity(
     project_id: UUID, access: Access, module: FromDishka[DeveloperPlatformModule]
 ) -> ActivityPage:
-    message = ReadResourceActivity(access, project_id)
+    message = ReadResourceActivity(access=access, project_id=project_id)
     rows = await module.query(message)
     return ActivityPage(items=[ActivityView.model_validate(asdict(row)) for row in rows])

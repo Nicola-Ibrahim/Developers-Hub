@@ -70,7 +70,7 @@ def test_local_preview_request_has_only_registration_fields() -> None:
         )
 
 
-def test_local_preview_handler_validates_name_ttl_and_persists_replay_identity() -> None:
+def test_local_preview_command_validates_name_and_handler_persists_replay_identity() -> None:
     access = AccessContext(uuid4(), uuid4(), "developer", frozenset({"resources:write"}))
     repository = FakeLocalPreviewRepository()
     handler = CreateLocalPreviewHandler(
@@ -78,24 +78,23 @@ def test_local_preview_handler_validates_name_ttl_and_persists_replay_identity()
         FakeFingerprint(),
     )
     command = CreateLocalPreview(
-        access,
-        LocalPreviewRegistration("feature-preview", uuid4(), 600),
-        "preview-key",
-        datetime(2026, 1, 1, tzinfo=UTC),
+        access=access,
+        request=LocalPreviewRegistration("feature-preview", uuid4(), 600),
+        idempotency_key="preview-key",
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     result, replayed = asyncio.run(handler.execute(command))
     assert result[0] == access
     assert result[1] == command.request
     assert result[2] == "preview-key"
     assert not replayed
-    invalid = CreateLocalPreview(
-        access,
-        LocalPreviewRegistration("Bad Name", uuid4(), 600),
-        "another-key",
-        datetime(2026, 1, 1, tzinfo=UTC),
-    )
     with pytest.raises(PlatformRequestError) as error:
-        asyncio.run(handler.execute(invalid))
+        CreateLocalPreview(
+            access=access,
+            request=LocalPreviewRegistration("Bad Name", uuid4(), 600),
+            idempotency_key="another-key",
+            now=datetime(2026, 1, 1, tzinfo=UTC),
+        )
     assert error.value.code == "invalid_workload_name"
 
 
@@ -117,14 +116,21 @@ def test_bare_image_id_is_local_only_and_requires_exact_approval() -> None:
         FakeFingerprint(),
     )
     local = DeployApplication(
-        access, uuid4(), DeploymentSpec(digest, "local"), "local-key", datetime.now(UTC)
+        access=access,
+        application_id=uuid4(),
+        request=DeploymentSpec(digest, "local"),
+        idempotency_key="local-key",
+        now=datetime.now(UTC),
     )
     assert asyncio.run(handler.execute(local))[2] == local.request
-    remote = DeployApplication(
-        access, uuid4(), DeploymentSpec(digest, "remote"), "remote-key", datetime.now(UTC)
-    )
     with pytest.raises(PlatformRequestError) as error:
-        asyncio.run(handler.execute(remote))
+        DeployApplication(
+            access=access,
+            application_id=uuid4(),
+            request=DeploymentSpec(digest, "remote"),
+            idempotency_key="remote-key",
+            now=datetime.now(UTC),
+        )
     assert error.value.code == "immutable_image_required"
 
 

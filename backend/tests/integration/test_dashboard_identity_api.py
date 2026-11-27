@@ -12,7 +12,7 @@ from test_foundation_postgres import async_engine_for, client_for
 from api.app import create_app
 from backend import BackendContainer
 from devops_platform.application.resource_management.catalog.query import ReadCatalog
-from identity.application.profile.update_profile import UpdateProfileCommand
+from identity.application.profile.update_profile.command import UpdateProfileCommand
 from identity.infra.persistence.models.user import InternalUserRow
 from shared.authorization.dispatch import operation_id
 from shared.authorization.interfaces import AuthorizationDecisionPort, AuthorizationUnavailable

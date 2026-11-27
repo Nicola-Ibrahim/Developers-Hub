@@ -231,7 +231,7 @@ from devops_platform.application.project_access.bootstrap_first_admin.handler im
 )
 from identity.application.accounts.create_user.command import CreateUserCommand
 from identity.application.accounts.create_user.handler import CreateUserHandler
-from devops_platform.application.projects.command import RegisterProjectCommand
+from devops_platform.application.projects.register_project.command import RegisterProjectCommand
 from shared.infra.settings import Settings
 
 
@@ -242,16 +242,23 @@ async def seed():
         async with container() as scope:
             registration = await scope.get(RegisterProjectCommandHandler)
             project = await registration.execute(
-                RegisterProjectCommand("demo", "platform", "example/demo", ("dev",))
+                RegisterProjectCommand(
+                    name="demo", owning_team="platform",
+                    repository="example/demo", environments=("dev",)
+                )
             )
             create_user = await scope.get(CreateUserHandler)
             bootstrap = await scope.get(BootstrapFirstAdminHandler)
             password = (
                 Path("/run/platform-secrets/acceptance_password").read_text().strip()
             )
-            user_id = await create_user.execute(CreateUserCommand("demo", password))
+            user_id = await create_user.execute(
+                CreateUserCommand(user_name="demo", password=password)
+            )
             await bootstrap.execute(
-                BootstrapFirstAdmin(user_id, project.project_id, datetime.now(UTC))
+                BootstrapFirstAdmin(
+                    user_id=user_id, project_id=project.project_id, now=datetime.now(UTC)
+                )
             )
         print(
             json.dumps({"project_id": str(project.project_id), "user_id": str(user_id)})

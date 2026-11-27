@@ -11,12 +11,10 @@ from api.core.errors import APIError
 from api.identity.authentication.credentials import (
     CSRF_HEADER,
 )
-from identity.application.api_tokens.personal_token_messages import (
-    CreatePersonalTokenCommand,
-    ListPersonalTokensQuery,
-    RevokePersonalTokenCommand,
-    RotatePersonalTokenCommand,
-)
+from identity.application.api_tokens.create_personal_token.command import CreatePersonalTokenCommand
+from identity.application.api_tokens.list_personal_tokens.query import ListPersonalTokensQuery
+from identity.application.api_tokens.revoke_personal_token.command import RevokePersonalTokenCommand
+from identity.application.api_tokens.rotate_personal_token.command import RotatePersonalTokenCommand
 from identity.application.interfaces.dispatch import IdentityModule
 from identity.domain.records import PersonalApiToken
 
@@ -48,7 +46,9 @@ async def list_tokens(
     module: FromDishka[IdentityModule],
     project_id: Annotated[UUID | None, Query(alias="projectId")] = None,
 ) -> list[dict[str, object]]:
-    query = ListPersonalTokensQuery(request.state.identity_principal.user_id, project_id)
+    query = ListPersonalTokensQuery(
+        actor_id=request.state.identity_principal.user_id, project_id=project_id
+    )
     items = await module.query(query)
     response.headers["Cache-Control"] = "no-store"
     return [_view(item) for item in items]
@@ -65,7 +65,11 @@ async def create_token(
 ) -> dict[str, object]:
     actor = request.state.identity_principal
     command = CreatePersonalTokenCommand(
-        actor.user_id, actor.project_id, body.name, tuple(body.scopes), body.hours
+        actor_id=actor.user_id,
+        project_id=actor.project_id,
+        name=body.name,
+        scopes=tuple(body.scopes),
+        hours=body.hours,
     )
     result = await module.execute(command)
     item, secret = result
@@ -83,7 +87,7 @@ async def rotate_token(
     module: FromDishka[IdentityModule],
 ) -> dict[str, object]:
     actor_id = request.state.identity_principal.user_id
-    command = RotatePersonalTokenCommand(actor_id, token_id)
+    command = RotatePersonalTokenCommand(actor_id=actor_id, token_id=token_id)
     result = await module.execute(command)
     if result is None:
         raise APIError(404, "not_found", "Token not found")
@@ -102,7 +106,7 @@ async def revoke_token(
     module: FromDishka[IdentityModule],
 ) -> Response:
     actor_id = request.state.identity_principal.user_id
-    command = RevokePersonalTokenCommand(actor_id, token_id)
+    command = RevokePersonalTokenCommand(actor_id=actor_id, token_id=token_id)
     revoked = await module.execute(command)
     if not revoked:
         raise APIError(404, "not_found", "Token not found")

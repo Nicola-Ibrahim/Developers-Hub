@@ -77,7 +77,9 @@ def test_http_ledger_authentication_and_commit_precede_success(outcome, monkeypa
 
     class Identity:
         async def query(self, query):
-            assert query == AuthenticateApiTokenQuery("synthetic-raw-bearer-token-for-operation")
+            assert query == AuthenticateApiTokenQuery(
+                token="synthetic-raw-bearer-token-for-operation"
+            )
             assert session.events == []
             events.append("authenticate")
             return AuthenticatedPrincipal(

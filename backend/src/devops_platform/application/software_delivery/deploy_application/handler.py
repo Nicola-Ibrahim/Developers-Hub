@@ -10,11 +10,6 @@ from devops_platform.application.software_delivery.deploy_application.command im
     DeployApplication,
 )
 from devops_platform.application.software_delivery.shared.models import DeploymentDetails
-from devops_platform.application.software_delivery.shared.policy import (
-    validate_delivery_key,
-)
-from devops_platform.domain.errors import DomainError
-from devops_platform.domain.value_objects.image_digest import ImageDigest
 
 
 class DeployApplicationHandler:
@@ -29,22 +24,7 @@ class DeployApplicationHandler:
 
     async def execute(self, message: DeployApplication) -> DeploymentDetails:
         access, application_id, command = message.access, message.application_id, message.request
-        validate_delivery_key(message.idempotency_key)
-        try:
-            image = ImageDigest(command.image_digest)
-        except DomainError as error:
-            raise PlatformRequestError(
-                "immutable_image_required",
-                "Deployment requires an image pinned by SHA-256 digest",
-                422,
-            ) from error
-        if image.is_local_image_id and command.target_id != "local":
-            raise PlatformRequestError(
-                "immutable_image_required",
-                "Bare Docker image IDs are supported only for the local target",
-                422,
-            )
-        if not self.images.is_approved(image.value, command.target_id):
+        if not self.images.is_approved(command.image_digest, command.target_id):
             raise PlatformRequestError(
                 "image_not_approved", "Image is not approved for this target", 403
             )

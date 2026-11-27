@@ -1,9 +1,10 @@
-from dataclasses import dataclass
+from pydantic import BaseModel, ConfigDict
 
 from devops_platform.application.shared.dto import AccessContext, CatalogResult
 from shared.dispatch import Query
 
 
-@dataclass(frozen=True, slots=True)
-class ReadCatalog(Query[CatalogResult]):
+class ReadCatalog(BaseModel, Query[CatalogResult]):
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+
     access: AccessContext

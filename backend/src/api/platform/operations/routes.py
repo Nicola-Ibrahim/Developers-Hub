@@ -24,6 +24,6 @@ Access = Annotated[AccessContext, Depends(platform_access)]
 async def operation(
     operation_id: UUID, access: Access, module: FromDishka[DeveloperPlatformModule]
 ) -> OperationView:
-    message = ReadOperation(access, operation_id)
+    message = ReadOperation(access=access, operation_id=operation_id)
     result = await module.query(message)
     return OperationView.model_validate(asdict(result))

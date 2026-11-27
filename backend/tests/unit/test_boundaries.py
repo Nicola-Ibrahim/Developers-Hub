@@ -119,6 +119,8 @@ def violation(module, target):
         if layer_parts in (["domain"], ["application"]) or module == "identity.contracts":
             if other == "shared" or "infra" in target_parts[1:]:
                 return True
+            if other == "pydantic" and layer_parts == ["application"]:
+                return False
             if other in IO_LIBRARIES:
                 return True
         if layer_parts == ["infra"]:
@@ -267,6 +269,8 @@ def test_indirect_package_reexport_cannot_smuggle_infrastructure_into_core():
         ("identity.application.flow", "from ..infra import tokens", True),
         ("identity.application.flow", "from ..domain import credentials", False),
         ("identity.application.flow", "from shared.dispatch import Command", False),
+        ("identity.application.flow", "from pydantic import BaseModel", False),
+        ("identity.domain.model", "from pydantic import BaseModel", True),
         ("devops_platform.application.flow", "from identity import contracts", True),
         (
             "api.platform.resources.routes",
@@ -295,7 +299,7 @@ def test_checker_resolves_relative_imports_and_reexports(module, source, forbidd
     assert any(violation(module, target) for target in imports(source, module)) is forbidden
 
 
-def test_application_packages_import_without_frameworks_or_other_contexts():
+def test_application_packages_import_without_io_frameworks_or_other_contexts():
     # Independent interpreters prevent previously loaded modules from hiding a leak.
     for context in ("identity", "devops_platform"):
         script = """
@@ -311,12 +315,14 @@ class DenyIO(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0,DenyIO())
 if sys.argv[2]=='identity':
     import identity.application.api_tokens.authenticate_api_token.handler
-    import identity.application.api_tokens.manage_personal_tokens
+    import identity.application.api_tokens.create_personal_token.handler
     import identity.application.api_tokens.revoke_api_token.handler
 else:
     import devops_platform.application.resource_management.catalog.handler,devops_platform.domain
 """
-        denied = IO_LIBRARIES | (CONTEXTS - {context})
+        # Pydantic uses stdlib modules such as secrets internally. The import
+        # graph check above still restricts their use in application source.
+        denied = (IO_LIBRARIES - sys.stdlib_module_names - {"pydantic"}) | (CONTEXTS - {context})
         subprocess.run(
             [sys.executable, "-I", "-c", script, str(SRC), context, ",".join(sorted(denied))],
             check=True,

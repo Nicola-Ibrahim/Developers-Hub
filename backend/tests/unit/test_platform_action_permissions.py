@@ -38,7 +38,7 @@ def test_all_scopes_remains_the_token_vocabulary() -> None:
 
 def test_request_uses_shared_operation_id_and_trusted_envelope() -> None:
     access = AccessContext(uuid4(), uuid4(), "developer", frozenset({"resources:read"}))
-    message = ReadProject(access, access.project_id)
+    message = ReadProject(access=access, project_id=access.project_id)
     facts = authorization_facts(message, access)
     authorizer = Authorizer(True)
 
@@ -52,7 +52,7 @@ def test_request_uses_shared_operation_id_and_trusted_envelope() -> None:
 
 def test_shared_denial_raises_the_transport_contract_exception() -> None:
     access = AccessContext(uuid4(), uuid4(), "developer", frozenset())
-    message = ReadDatabaseConnection(access, uuid4())
+    message = ReadDatabaseConnection(access=access, resource_id=uuid4())
     authorizer = Authorizer(False)
 
     with pytest.raises(CatalogForbidden):
@@ -66,7 +66,7 @@ def test_shared_denial_raises_the_transport_contract_exception() -> None:
 def test_read_projects_facts_can_be_built_for_each_distinct_subject_project() -> None:
     project_id = uuid4()
     access = AccessContext(uuid4(), project_id, "developer", frozenset(ALL_SCOPES))
-    message = ReadProjects(access.user_id, (access,))
+    message = ReadProjects(user_id=access.user_id, accesses=(access,))
     facts = authorization_facts(message, access, project_id=project_id)
     assert facts.resource_kind == "projects"
     assert facts.project_id == project_id

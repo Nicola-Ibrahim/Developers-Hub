@@ -37,7 +37,11 @@ async def _member_access(
     csrf_token: str | None = None,
 ) -> AccessContext:
     principal = await identity.query(
-        AuthenticateSessionQuery(require_cookie_session(credentials), project_id, csrf_token)
+        AuthenticateSessionQuery(
+            session_token=require_cookie_session(credentials),
+            project_id=project_id,
+            csrf_token=csrf_token,
+        )
     )
     if principal.project_id != project_id or principal.role not in {"developer", "admin"}:
         raise SessionAuthenticationRejected()
@@ -77,7 +81,7 @@ async def list_project_members(
     module: FromDishka[DeveloperPlatformModule],
 ) -> list[dict[str, object]]:
     response.headers["Cache-Control"] = "no-store"
-    members = await module.query(ListProjectMembers(access, project_id))
+    members = await module.query(ListProjectMembers(access=access, project_id=project_id))
     return [
         {"userId": str(user_id), "userName": name, "role": role, "active": active}
         for user_id, name, role, active in members
@@ -94,7 +98,13 @@ async def set_project_member(
     module: FromDishka[DeveloperPlatformModule],
 ) -> Response:
     await module.execute(
-        ManageProjectMembership(access, project_id, user_id, body.role, datetime.now(UTC))
+        ManageProjectMembership(
+            access=access,
+            project_id=project_id,
+            user_id=user_id,
+            role=body.role,
+            now=datetime.now(UTC),
+        )
     )
     return Response(status_code=204)
 
@@ -108,6 +118,8 @@ async def remove_project_member(
     module: FromDishka[DeveloperPlatformModule],
 ) -> Response:
     await module.execute(
-        ManageProjectMembership(access, project_id, user_id, None, datetime.now(UTC))
+        ManageProjectMembership(
+            access=access, project_id=project_id, user_id=user_id, role=None, now=datetime.now(UTC)
+        )
     )
     return Response(status_code=204)

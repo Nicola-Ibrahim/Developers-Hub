@@ -43,7 +43,11 @@ async def login(
     with login_request_rate_limiter.admit(peer) as allowed:
         if not allowed:
             raise APIError(429, "login_rate_limited", "Too many login requests. Try again later.")
-        result = await module.execute(LoginCommand(body.user_name, body.password, body.project_id))
+        result = await module.execute(
+            LoginCommand(
+                user_name=body.user_name, password=body.password, project_id=body.project_id
+            )
+        )
     response.set_cookie(
         SESSION_COOKIE,
         result.session_token,
@@ -70,8 +74,8 @@ async def select_project(
     module: FromDishka[IdentityModule],
 ) -> dict[str, object]:
     command = SelectActiveProjectCommand(
-        require_cookie_session(browser_credentials(request)),
-        body.project_id,
+        session_token=require_cookie_session(browser_credentials(request)),
+        project_id=body.project_id,
     )
     principal = await module.execute(command)
     return {"csrfToken": principal.csrf_token, "principal": _principal(principal)}
@@ -87,7 +91,7 @@ async def logout(
     module: FromDishka[IdentityModule],
 ) -> Response:
     command = LogoutCommand(
-        require_cookie_session(browser_credentials(request)),
+        session_token=require_cookie_session(browser_credentials(request)),
     )
     await module.execute(command)
     response.delete_cookie(
@@ -110,7 +114,7 @@ async def logout_all(
     cookie_policy: FromDishka[BrowserCookiePolicy],
     module: FromDishka[IdentityModule],
 ) -> dict[str, int]:
-    command = RevokeAllSessionsCommand(request.state.identity_principal.user_id)
+    command = RevokeAllSessionsCommand(actor_id=request.state.identity_principal.user_id)
     count = await module.execute(command)
     response.delete_cookie(
         SESSION_COOKIE,

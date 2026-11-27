@@ -10,8 +10,9 @@ from api.identity.authentication.credentials import (
 )
 from api.identity.profile.schemas import ProfileView, SecurityActivityView, UpdateProfileBody
 from identity.application.interfaces.dispatch import IdentityModule
-from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery
-from identity.application.profile.update_profile import UpdateProfileCommand
+from identity.application.profile.read_profile.query import ProfileQuery
+from identity.application.profile.security_history.query import SecurityHistoryQuery
+from identity.application.profile.update_profile.command import UpdateProfileCommand
 
 router = APIRouter()
 
@@ -25,7 +26,7 @@ async def get_profile(
 ) -> ProfileView:
     response.headers["Cache-Control"] = "no-store"
     actor = request.state.identity_principal
-    query = ProfileQuery(actor.user_id)
+    query = ProfileQuery(actor_id=actor.user_id)
     profile = await module.query(query)
     return ProfileView(
         userId=profile.user_id, userName=profile.user_name, displayName=profile.display_name
@@ -42,8 +43,8 @@ async def patch_profile(
     module: FromDishka[IdentityModule],
 ) -> ProfileView:
     command = UpdateProfileCommand(
-        request.state.identity_principal.user_id,
-        body.display_name,
+        actor_id=request.state.identity_principal.user_id,
+        display_name=body.display_name,
     )
     profile = await module.execute(command)
     response.headers["Cache-Control"] = "no-store"
@@ -61,7 +62,7 @@ async def security_history(
 ) -> list[SecurityActivityView]:
     response.headers["Cache-Control"] = "no-store"
     principal = request.state.identity_principal
-    query = SecurityHistoryQuery(principal.user_id)
+    query = SecurityHistoryQuery(actor_id=principal.user_id)
     items = await module.query(query)
     return [
         SecurityActivityView(

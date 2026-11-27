@@ -1,8 +1,9 @@
-from dataclasses import dataclass, field
+from pydantic import BaseModel, ConfigDict, Field
 
 from shared.dispatch import Command
 
 
-@dataclass(frozen=True, slots=True)
-class LogoutCommand(Command[None]):
-    session_token: str = field(repr=False)
+class LogoutCommand(BaseModel, Command[None]):
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid", hide_input_in_errors=True)
+
+    session_token: str = Field(repr=False)

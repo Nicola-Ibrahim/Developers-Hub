@@ -3,13 +3,12 @@ from uuid import uuid4
 
 import pytest
 
-from identity.application.profile.handlers import (
-    ReadProfileHandler,
-    SecurityHistoryHandler,
-    UpdateProfileHandler,
-)
-from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery
-from identity.application.profile.update_profile import UpdateProfileCommand
+from identity.application.profile.read_profile.handler import ReadProfileHandler
+from identity.application.profile.read_profile.query import ProfileQuery
+from identity.application.profile.security_history.handler import SecurityHistoryHandler
+from identity.application.profile.security_history.query import SecurityHistoryQuery
+from identity.application.profile.update_profile.command import UpdateProfileCommand
+from identity.application.profile.update_profile.handler import UpdateProfileHandler
 from identity.domain.errors import IdentityValidationError
 from identity.domain.records import AccountProfile, SessionPrincipal
 
@@ -43,9 +42,13 @@ def test_profile_read_and_write_are_scoped_to_authenticated_user():
 
     users = Users()
     handler = UpdateProfileHandler(users)
-    profile = asyncio.run(ReadProfileHandler(users).execute(ProfileQuery(user_id)))
-    updated = asyncio.run(handler.execute(UpdateProfileCommand(user_id, "Alice")))
-    cleared = asyncio.run(handler.execute(UpdateProfileCommand(user_id, None)))
+    profile = asyncio.run(ReadProfileHandler(users).execute(ProfileQuery(actor_id=user_id)))
+    updated = asyncio.run(
+        handler.execute(UpdateProfileCommand(actor_id=user_id, display_name="Alice"))
+    )
+    cleared = asyncio.run(
+        handler.execute(UpdateProfileCommand(actor_id=user_id, display_name=None))
+    )
 
     assert profile.user_id == updated.user_id == user_id
     assert updated.user_name == "immutable-name"
@@ -59,7 +62,9 @@ def test_profile_read_and_write_are_scoped_to_authenticated_user():
 def test_profile_validation_rejects_invalid_display_name_before_persistence(display_name):
     handler = UpdateProfileHandler(object())
     with pytest.raises(IdentityValidationError):
-        asyncio.run(handler.execute(UpdateProfileCommand(uuid4(), display_name)))
+        asyncio.run(
+            handler.execute(UpdateProfileCommand(actor_id=uuid4(), display_name=display_name))
+        )
 
 
 def test_security_history_query_uses_only_authenticated_subject_and_is_bounded():
@@ -79,7 +84,7 @@ def test_security_history_query_uses_only_authenticated_subject_and_is_bounded()
 
     users = Users()
     handler = SecurityHistoryHandler(users)
-    asyncio.run(handler.execute(SecurityHistoryQuery(user_id)))
+    asyncio.run(handler.execute(SecurityHistoryQuery(actor_id=user_id)))
     assert users.requested == (user_id, 100)
 
 
@@ -90,5 +95,9 @@ def test_profile_write_uses_router_authorized_actor():
         async def update_profile(self, *, user_id: object, display_name: str, now: object):
             return AccountProfile(user_id, "alice", display_name)
 
-    result = asyncio.run(UpdateProfileHandler(Users()).execute(UpdateProfileCommand(user_id, "A")))
+    result = asyncio.run(
+        UpdateProfileHandler(Users()).execute(
+            UpdateProfileCommand(actor_id=user_id, display_name="A")
+        )
+    )
     assert result.user_id == user_id

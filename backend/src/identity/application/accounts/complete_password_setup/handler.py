@@ -8,7 +8,6 @@ from identity.application.interfaces.identity_transactions import IdentityTransa
 from identity.application.interfaces.security import PasswordHasher, TokenHasher
 from identity.domain.interfaces.session_repository import SessionRepository
 from identity.domain.interfaces.user_repository import UserRepository
-from identity.domain.password_policy import validate_password
 
 
 class CompletePasswordSetupHandler:
@@ -23,7 +22,6 @@ class CompletePasswordSetupHandler:
         self.hasher = hasher
 
     async def execute(self, command: CompletePasswordSetupCommand) -> bool:
-        validate_password(command.new_password)
         encoded = await asyncio.to_thread(self.passwords.hash, command.new_password)
 
         async def consume(users: UserRepository, sessions: SessionRepository) -> bool:

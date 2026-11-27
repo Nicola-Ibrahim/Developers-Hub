@@ -12,6 +12,7 @@ from api.identity.authentication.credentials import (
     require_browser_origin,
     require_valid_browser_session,
 )
+from identity.application.accounts.change_password.command import ChangePasswordCommand
 from identity.application.accounts.change_password.handler import (
     PreparedPasswordChange,
     verify_password_change,
@@ -69,7 +70,7 @@ def test_browser_mutation_checks_origin_before_locking_and_rejects_invalid_csrf(
                 return hasher
 
         module = IdentityModule(Container(), RequestCredentials(browser_credentials(mutation)))
-        check = await module._precondition(LogoutCommand("session"))
+        check = await module._precondition(LogoutCommand(session_token="session"))
         return await check(Repository(), None)
 
     with pytest.raises(APIError) as origin_denied:
@@ -230,7 +231,9 @@ def test_login_handler_commits_rejected_credentials_before_returning_rejection()
 
     async def execute():
         with pytest.raises(SessionAuthenticationRejected):
-            await handler.execute(LoginCommand(" Alice ", "wrong", None))
+            await handler.execute(
+                LoginCommand(user_name=" Alice ", password="wrong", project_id=None)
+            )
 
     asyncio.run(execute())
     assert events == [
@@ -249,7 +252,14 @@ def test_password_change_checks_current_password_and_preserves_version_fence():
 
     async def check() -> None:
         prepared = await verify_password_change(
-            hasher, account, "current-password-value", "new-password-value"
+            hasher,
+            account,
+            ChangePasswordCommand(
+                actor_id=account.user_id,
+                actor_name=account.user_name,
+                current_password="current-password-value",
+                new_password="new-password-value",
+            ),
         )
         assert isinstance(prepared, PreparedPasswordChange)
         assert prepared.credential_version == 7
@@ -257,7 +267,14 @@ def test_password_change_checks_current_password_and_preserves_version_fence():
         assert "new-password-value" not in repr(prepared)
         with pytest.raises(SessionAuthenticationRejected):
             await verify_password_change(
-                hasher, account, "incorrect-current-password", "another-new-password"
+                hasher,
+                account,
+                ChangePasswordCommand(
+                    actor_id=account.user_id,
+                    actor_name=account.user_name,
+                    current_password="incorrect-current-password",
+                    new_password="short",
+                ),
             )
 
     asyncio.run(check())

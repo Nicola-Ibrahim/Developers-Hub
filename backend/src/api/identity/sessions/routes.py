@@ -31,7 +31,7 @@ async def browser_me(
     response: Response,
     module: FromDishka[IdentityModule],
 ) -> dict[str, object]:
-    command = RotateCsrfCommand(require_cookie_session(browser_credentials(request)))
+    command = RotateCsrfCommand(session_token=require_cookie_session(browser_credentials(request)))
     principal = await module.execute(command)
     response.headers["Cache-Control"] = "no-store"
     return {"csrfToken": principal.csrf_token, "principal": _principal(principal)}
@@ -46,7 +46,7 @@ async def sessions(
 ) -> list[dict[str, object]]:
     response.headers["Cache-Control"] = "no-store"
     actor = request.state.identity_principal
-    query = ListSessionsQuery(actor.user_id, actor.session_id)
+    query = ListSessionsQuery(actor_id=actor.user_id, current_session_id=actor.session_id)
     values = await module.query(query)
     return [
         {
@@ -71,8 +71,8 @@ async def revoke_session(
     module: FromDishka[IdentityModule],
 ) -> Response:
     command = RevokeSessionCommand(
-        request.state.identity_principal.user_id,
-        session_id,
+        actor_id=request.state.identity_principal.user_id,
+        session_id=session_id,
     )
     await module.execute(command)
     response.status_code = 204
@@ -91,7 +91,10 @@ async def change_password(
 ) -> Response:
     actor = request.state.identity_principal
     command = ChangePasswordCommand(
-        actor.user_id, actor.user_name, body.current_password, body.new_password
+        actor_id=actor.user_id,
+        actor_name=actor.user_name,
+        current_password=body.current_password,
+        new_password=body.new_password,
     )
     await module.execute(command)
     response.delete_cookie(

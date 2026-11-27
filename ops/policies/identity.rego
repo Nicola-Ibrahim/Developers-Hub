@@ -8,18 +8,18 @@ allow if {
 	input.subject.id == input.resource.owner_id
 	input.action in {
 		"identity.application.sessions.list_sessions.query.ListSessionsQuery",
-		"identity.application.profile.profile_query.ProfileQuery",
-		"identity.application.profile.profile_query.SecurityHistoryQuery",
+		"identity.application.profile.read_profile.query.ProfileQuery",
+		"identity.application.profile.security_history.query.SecurityHistoryQuery",
 		"identity.application.sessions.rotate_csrf.command.RotateCsrfCommand",
 		"identity.application.authentication.logout.command.LogoutCommand",
 		"identity.application.sessions.revoke_all_sessions.command.RevokeAllSessionsCommand",
 		"identity.application.sessions.revoke_session.command.RevokeSessionCommand",
 		"identity.application.accounts.change_password.command.ChangePasswordCommand",
-		"identity.application.profile.update_profile.UpdateProfileCommand",
-		"identity.application.api_tokens.personal_token_messages.ListPersonalTokensQuery",
-		"identity.application.api_tokens.personal_token_messages.CreatePersonalTokenCommand",
-		"identity.application.api_tokens.personal_token_messages.RotatePersonalTokenCommand",
-		"identity.application.api_tokens.personal_token_messages.RevokePersonalTokenCommand",
+		"identity.application.profile.update_profile.command.UpdateProfileCommand",
+		"identity.application.api_tokens.list_personal_tokens.query.ListPersonalTokensQuery",
+		"identity.application.api_tokens.create_personal_token.command.CreatePersonalTokenCommand",
+		"identity.application.api_tokens.rotate_personal_token.command.RotatePersonalTokenCommand",
+		"identity.application.api_tokens.revoke_personal_token.command.RevokePersonalTokenCommand",
 	}
 	input.resource.kind in {"session", "profile", "token"}
 }

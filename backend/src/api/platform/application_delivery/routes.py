@@ -108,7 +108,10 @@ async def create_application(
     idempotency_key: IdempotencyKey,
 ) -> ApplicationAccepted:
     message = CreateApplication(
-        access, ApplicationRegistration(**body.model_dump()), idempotency_key, datetime.now(UTC)
+        access=access,
+        request=ApplicationRegistration(**body.model_dump()),
+        idempotency_key=idempotency_key,
+        now=datetime.now(UTC),
     )
     application, replayed = await module.execute(message)
     return ApplicationAccepted(application=_application(application), replayed=replayed)
@@ -128,7 +131,10 @@ async def create_local_preview(
     idempotency_key: IdempotencyKey,
 ) -> ApplicationAccepted:
     message = CreateLocalPreview(
-        access, LocalPreviewRegistration(**body.model_dump()), idempotency_key, datetime.now(UTC)
+        access=access,
+        request=LocalPreviewRegistration(**body.model_dump()),
+        idempotency_key=idempotency_key,
+        now=datetime.now(UTC),
     )
     application, replayed = await module.execute(message)
     return ApplicationAccepted(application=_application(application), replayed=replayed)
@@ -140,7 +146,7 @@ async def applications(
     access: PlatformAccess,
     module: FromDishka[DeveloperPlatformModule],
 ) -> list[ApplicationView]:
-    message = ReadApplications(access)
+    message = ReadApplications(access=access)
     return [_application(item) for item in await module.query(message)]
 
 
@@ -155,7 +161,7 @@ async def application(
     access: PlatformAccess,
     module: FromDishka[DeveloperPlatformModule],
 ) -> ApplicationDetail:
-    message = ReadApplication(access, application_id)
+    message = ReadApplication(access=access, application_id=application_id)
     app, steps = await module.query(message)
     return ApplicationDetail(application=_application(app), steps=[_step(item) for item in steps])
 
@@ -175,11 +181,11 @@ async def attach_resource(
     idempotency_key: IdempotencyKey,
 ) -> DeliveryStepView:
     message = AttachDatabase(
-        access,
-        application_id,
-        ResourceAttachmentSpec(**body.model_dump()),
-        idempotency_key,
-        datetime.now(UTC),
+        access=access,
+        application_id=application_id,
+        request=ResourceAttachmentSpec(**body.model_dump()),
+        idempotency_key=idempotency_key,
+        now=datetime.now(UTC),
     )
     step = await module.execute(message)
     return _step(step)
@@ -200,11 +206,11 @@ async def deploy(
     idempotency_key: IdempotencyKey,
 ) -> DeploymentView:
     message = DeployApplication(
-        access,
-        application_id,
-        DeploymentSpec(**body.model_dump()),
-        idempotency_key,
-        datetime.now(UTC),
+        access=access,
+        application_id=application_id,
+        request=DeploymentSpec(**body.model_dump()),
+        idempotency_key=idempotency_key,
+        now=datetime.now(UTC),
     )
     deployment = await module.execute(message)
     return _deployment(deployment)
@@ -221,7 +227,7 @@ async def deployment_history(
     access: PlatformAccess,
     module: FromDishka[DeveloperPlatformModule],
 ) -> list[DeploymentView]:
-    message = ReadDeploymentHistory(access, application_id)
+    message = ReadDeploymentHistory(access=access, application_id=application_id)
     return [_deployment(item) for item in await module.query(message)]
 
 
@@ -237,7 +243,9 @@ async def retry_step(
     access: PlatformAccess,
     module: FromDishka[DeveloperPlatformModule],
 ) -> DeliveryStepView:
-    message = RetryDeliveryStep(access, application_id, step_id, datetime.now(UTC))
+    message = RetryDeliveryStep(
+        access=access, application_id=application_id, step_id=step_id, now=datetime.now(UTC)
+    )
     return _step(await module.execute(message))
 
 
@@ -252,11 +260,11 @@ async def github_webhook(
     module: FromDishka[DeveloperPlatformModule],
 ) -> WebhookResponse:
     message = ProcessGithubPreviewWebhook(
-        await request.body(),
-        request.headers.get("x-hub-signature-256"),
-        request.headers.get("x-github-delivery"),
-        request.headers.get("x-github-event"),
-        datetime.now(UTC),
+        raw_body=await request.body(),
+        signature=request.headers.get("x-hub-signature-256"),
+        delivery_id=request.headers.get("x-github-delivery"),
+        event=request.headers.get("x-github-event"),
+        now=datetime.now(UTC),
     )
     result = await module.execute(message)
     return WebhookResponse(

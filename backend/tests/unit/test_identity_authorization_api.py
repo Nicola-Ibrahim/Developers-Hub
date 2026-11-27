@@ -11,16 +11,14 @@ from fastapi.testclient import TestClient
 
 from api.app import create_app
 from api.settings.config import BrowserCookiePolicy
-from identity.application.api_tokens.personal_token_messages import (
-    CreatePersonalTokenCommand,
-)
+from identity.application.api_tokens.create_personal_token.command import CreatePersonalTokenCommand
 from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.authentication.login.result import LoginResult
 from identity.application.interfaces.dispatch import IdentityModule
 from identity.application.interfaces.session_tokens import SessionTokenVerifier
-from identity.application.profile.profile_query import ProfileQuery
-from identity.application.profile.update_profile import UpdateProfileCommand
+from identity.application.profile.read_profile.query import ProfileQuery
+from identity.application.profile.update_profile.command import UpdateProfileCommand
 from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand
 from identity.application.sessions.revoke_session.command import RevokeSessionCommand
 from identity.application.sessions.rotate_csrf.command import RotateCsrfCommand

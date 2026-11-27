@@ -37,7 +37,7 @@ Bearer = Annotated[RequestIdentity, Depends(request_identity)]
 async def project(
     project_id: UUID, access: Access, module: FromDishka[DeveloperPlatformModule]
 ) -> ProjectRegistrationView:
-    message = ReadProject(access, project_id)
+    message = ReadProject(access=access, project_id=project_id)
     result = await module.query(message)
     return ProjectRegistrationView.model_validate(asdict(result))
 
@@ -51,7 +51,7 @@ async def projects(
 ) -> list[ProjectRegistrationView]:
     if isinstance(credentials, BrowserCredentials):
         principal = await identity.query(
-            AuthenticateSessionQuery(require_cookie_session(credentials))
+            AuthenticateSessionQuery(session_token=require_cookie_session(credentials))
         )
         user_id = principal.user_id
         accesses = tuple(
@@ -65,7 +65,7 @@ async def projects(
             if member.role in {"developer", "admin"}
         )
     else:
-        token_principal = await identity.query(AuthenticateApiTokenQuery(credentials))
+        token_principal = await identity.query(AuthenticateApiTokenQuery(token=credentials))
         user_id = token_principal.user_id
         accesses = (
             AccessContext(
@@ -75,6 +75,6 @@ async def projects(
                 token_principal.scopes,
             ),
         )
-    message = ReadProjects(user_id, accesses)
+    message = ReadProjects(user_id=user_id, accesses=accesses)
     rows = await module.query(message)
     return [ProjectRegistrationView.model_validate(asdict(row)) for row in rows]

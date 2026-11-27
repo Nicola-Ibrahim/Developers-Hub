@@ -89,6 +89,7 @@ Do not force folder layouts or patterns merely for consistency.
 - Give each workflow clear responsibility and ownership.
 - Prefer cohesive orchestration over unnecessary delegation.
 - Use commands, queries and handlers when beneficial.
+- Use Pydantic models for application commands and queries, and validate their inputs there.
 - Internal operations need not become separate use cases.
 - Avoid duplicate logic, forwarding layers and redundant contracts.
 

@@ -12,8 +12,9 @@ from test_foundation_postgres import async_engine_for, dispatch_browser
 from backend import BackendContainer
 from identity.application.authentication.login.command import LoginCommand
 from identity.application.interfaces.dispatch import IdentityModule
-from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery
-from identity.application.profile.update_profile import UpdateProfileCommand
+from identity.application.profile.read_profile.query import ProfileQuery
+from identity.application.profile.security_history.query import SecurityHistoryQuery
+from identity.application.profile.update_profile.command import UpdateProfileCommand
 from identity.domain.session_errors import SessionAuthenticationRejected
 from identity.infra.persistence.models.activity import IdentityActivityRow
 from identity.infra.persistence.models.session import SessionRow
@@ -43,22 +44,24 @@ def test_profile_and_security_history_are_user_owned_and_csrf_failure_rolls_back
             async with container() as scope:
                 identity = await scope.get(IdentityModule)
                 credentials = await scope.get(RequestCredentials)
-                first_login = await identity.execute(LoginCommand(first_user_name, PASSWORD, None))
+                first_login = await identity.execute(
+                    LoginCommand(user_name=first_user_name, password=PASSWORD, project_id=None)
+                )
                 second_login = await identity.execute(
-                    LoginCommand(second_user_name, PASSWORD, None)
+                    LoginCommand(user_name=second_user_name, password=PASSWORD, project_id=None)
                 )
 
                 first_profile = await dispatch_browser(
                     identity.query,
                     credentials,
                     SessionCredentials(first_login.session_token),
-                    ProfileQuery(first_user_id),
+                    ProfileQuery(actor_id=first_user_id),
                 )
                 second_profile = await dispatch_browser(
                     identity.query,
                     credentials,
                     SessionCredentials(second_login.session_token),
-                    ProfileQuery(second_user_id),
+                    ProfileQuery(actor_id=second_user_id),
                 )
                 assert first_profile.user_id == first_user_id
                 assert first_profile.user_name == first_user_name
@@ -73,14 +76,14 @@ def test_profile_and_security_history_are_user_owned_and_csrf_failure_rolls_back
                     SessionCredentials(
                         first_login.session_token, csrf_token=first_login.csrf_token
                     ),
-                    UpdateProfileCommand(first_user_id, "First User Display"),
+                    UpdateProfileCommand(actor_id=first_user_id, display_name="First User Display"),
                 )
                 assert changed.display_name == "First User Display"
                 second_profile_after_change = await dispatch_browser(
                     identity.query,
                     credentials,
                     SessionCredentials(second_login.session_token),
-                    ProfileQuery(second_user_id),
+                    ProfileQuery(actor_id=second_user_id),
                 )
                 assert second_profile_after_change.display_name is None
 
@@ -88,13 +91,13 @@ def test_profile_and_security_history_are_user_owned_and_csrf_failure_rolls_back
                     identity.query,
                     credentials,
                     SessionCredentials(first_login.session_token),
-                    SecurityHistoryQuery(first_user_id),
+                    SecurityHistoryQuery(actor_id=first_user_id),
                 )
                 second_history = await dispatch_browser(
                     identity.query,
                     credentials,
                     SessionCredentials(second_login.session_token),
-                    SecurityHistoryQuery(second_user_id),
+                    SecurityHistoryQuery(actor_id=second_user_id),
                 )
                 assert any(
                     item.action == "profile_updated" and item.outcome == "succeeded"
@@ -110,7 +113,7 @@ def test_profile_and_security_history_are_user_owned_and_csrf_failure_rolls_back
                         identity.execute,
                         credentials,
                         SessionCredentials(first_login.session_token, csrf_token="invalid-csrf"),
-                        UpdateProfileCommand(first_user_id, "Must Roll Back"),
+                        UpdateProfileCommand(actor_id=first_user_id, display_name="Must Roll Back"),
                     )
 
                 session = SessionCredentials(
@@ -127,21 +130,25 @@ def test_profile_and_security_history_are_user_owned_and_csrf_failure_rolls_back
                         identity.execute,
                         credentials,
                         session,
-                        UpdateProfileCommand(first_user_id, "Must Stay Revoked"),
+                        UpdateProfileCommand(
+                            actor_id=first_user_id, display_name="Must Stay Revoked"
+                        ),
                     )
 
-                fresh_login = await identity.execute(LoginCommand(first_user_name, PASSWORD, None))
+                fresh_login = await identity.execute(
+                    LoginCommand(user_name=first_user_name, password=PASSWORD, project_id=None)
+                )
                 persisted = await dispatch_browser(
                     identity.query,
                     credentials,
                     SessionCredentials(fresh_login.session_token),
-                    ProfileQuery(first_user_id),
+                    ProfileQuery(actor_id=first_user_id),
                 )
                 after_rejection = await dispatch_browser(
                     identity.query,
                     credentials,
                     SessionCredentials(fresh_login.session_token),
-                    SecurityHistoryQuery(first_user_id),
+                    SecurityHistoryQuery(actor_id=first_user_id),
                 )
                 assert persisted.display_name == "First User Display"
                 assert sum(item.action == "profile_updated" for item in after_rejection) == 1

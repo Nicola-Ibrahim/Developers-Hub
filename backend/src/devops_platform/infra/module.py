@@ -1,9 +1,10 @@
 """Own Platform authorization, action transactions and handler dispatch."""
 
-from dataclasses import is_dataclass, replace
+from dataclasses import replace
 from typing import TypeVar, cast
 
 from dishka import AsyncContainer, Scope
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from devops_platform.application.applications.create_application.command import (
@@ -123,7 +124,7 @@ class DeveloperPlatformModule(DeveloperPlatformModuleContract):
         self,
         message: Command[ResultT] | Query[ResultT],
     ) -> ResultT:
-        if not is_dataclass(message) or not (
+        if not isinstance(message, BaseModel) or not (
             hasattr(message, "access") or isinstance(message, ReadProjects)
         ):
             raise TypeError("Platform message lacks access context")
@@ -155,7 +156,8 @@ class DeveloperPlatformModule(DeveloperPlatformModuleContract):
                     raise CatalogForbidden()
                 current_access = replace(access, role=role)
                 current = cast(
-                    Command[ResultT] | Query[ResultT], replace(message, access=current_access)
+                    Command[ResultT] | Query[ResultT],
+                    message.model_copy(update={"access": current_access}),
                 )
                 await self._authorize(
                     current, unit.session, current_access, replace(facts, role=role)
@@ -181,7 +183,7 @@ class DeveloperPlatformModule(DeveloperPlatformModuleContract):
             for project_id, access in requested.items()
             if project_id in roles
         )
-        current = replace(message, accesses=accesses)
+        current = message.model_copy(update={"accesses": accesses})
         if not accesses:
             await require_authorized(
                 self._authorizer,

@@ -70,7 +70,9 @@ class LedgerApplicationResources(ResourceProvisioner):
             )
             # Hash delivery keys to fit the resource ledger's bounded key contract.
             key = "app:" + hashlib.sha256(idempotency_key.encode()).hexdigest()
-            message = RequestTemporaryDatabase(access, request, key, datetime.now(UTC))
+            message = RequestTemporaryDatabase(
+                access=access, request=request, idempotency_key=key, now=datetime.now(UTC)
+            )
             await require_authorized(
                 self.authorizer,
                 message,

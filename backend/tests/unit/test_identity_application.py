@@ -69,7 +69,7 @@ def test_authenticate_api_token_reads_repository_and_rejects_malformed_before_qu
     result = asyncio.run(
         AuthenticateApiTokenHandler(
             FakeTransaction(repository), PepperedTokenHasher("p" * 32)
-        ).execute(AuthenticateApiTokenQuery(TOKEN))
+        ).execute(AuthenticateApiTokenQuery(token=TOKEN))
     )
     assert result.role == "developer"
     assert result.scopes == frozenset({"catalog:read"})
@@ -80,7 +80,7 @@ def test_authenticate_api_token_reads_repository_and_rejects_malformed_before_qu
             asyncio.run(
                 AuthenticateApiTokenHandler(
                     FakeTransaction(repository), PepperedTokenHasher("p" * 32)
-                ).execute(AuthenticateApiTokenQuery(invalid))
+                ).execute(AuthenticateApiTokenQuery(token=invalid))
             )
     assert len(repository.calls) == 1
 
@@ -111,7 +111,7 @@ def test_authenticate_api_token_rejects_invalid_repository_snapshot(changes):
     with pytest.raises(AuthenticationRejected):
         asyncio.run(
             AuthenticateApiTokenHandler(FakeTransaction(repository), FakeHasher()).execute(
-                AuthenticateApiTokenQuery(TOKEN)
+                AuthenticateApiTokenQuery(token=TOKEN)
             )
         )
 
@@ -121,7 +121,9 @@ def test_revoke_api_token_is_idempotent_and_audits_only_first_revoke():
     missing = FakeRepository(token=None)
     assert (
         asyncio.run(
-            RevokeApiTokenHandler(FakeTransaction(missing)).execute(RevokeApiTokenCommand(token_id))
+            RevokeApiTokenHandler(FakeTransaction(missing)).execute(
+                RevokeApiTokenCommand(token_id=token_id)
+            )
         )
         is False
     )
@@ -132,7 +134,7 @@ def test_revoke_api_token_is_idempotent_and_audits_only_first_revoke():
     assert (
         asyncio.run(
             RevokeApiTokenHandler(FakeTransaction(repository)).execute(
-                RevokeApiTokenCommand(token_id)
+                RevokeApiTokenCommand(token_id=token_id)
             )
         )
         is True
@@ -149,7 +151,7 @@ def test_revoke_api_token_is_idempotent_and_audits_only_first_revoke():
     assert (
         asyncio.run(
             RevokeApiTokenHandler(FakeTransaction(repository)).execute(
-                RevokeApiTokenCommand(token_id)
+                RevokeApiTokenCommand(token_id=token_id)
             )
         )
         is True

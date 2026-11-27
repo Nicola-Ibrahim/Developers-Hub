@@ -13,18 +13,14 @@ from identity.application.api_tokens.authenticate_api_token.handler import (
     AuthenticateApiTokenHandler,
 )
 from identity.application.api_tokens.authenticate_api_token.query import AuthenticateApiTokenQuery
-from identity.application.api_tokens.manage_personal_tokens import (
-    CreatePersonalTokenHandler,
-    PersonalTokenQueryHandler,
-    RevokePersonalTokenHandler,
-    RotatePersonalTokenHandler,
-)
-from identity.application.api_tokens.personal_token_messages import (
-    CreatePersonalTokenCommand,
-    ListPersonalTokensQuery,
-    RevokePersonalTokenCommand,
-    RotatePersonalTokenCommand,
-)
+from identity.application.api_tokens.create_personal_token.command import CreatePersonalTokenCommand
+from identity.application.api_tokens.create_personal_token.handler import CreatePersonalTokenHandler
+from identity.application.api_tokens.list_personal_tokens.handler import PersonalTokenQueryHandler
+from identity.application.api_tokens.list_personal_tokens.query import ListPersonalTokensQuery
+from identity.application.api_tokens.revoke_personal_token.command import RevokePersonalTokenCommand
+from identity.application.api_tokens.revoke_personal_token.handler import RevokePersonalTokenHandler
+from identity.application.api_tokens.rotate_personal_token.command import RotatePersonalTokenCommand
+from identity.application.api_tokens.rotate_personal_token.handler import RotatePersonalTokenHandler
 from identity.application.authentication.authenticate_session.handler import (
     AuthenticateSessionHandler,
 )
@@ -38,13 +34,12 @@ from identity.application.authentication.logout.handler import LogoutHandler
 from identity.application.interfaces.dispatch import ActionPrecondition
 from identity.application.interfaces.dispatch import IdentityModule as IdentityModuleContract
 from identity.application.interfaces.security import TokenHasher
-from identity.application.profile.handlers import (
-    ReadProfileHandler,
-    SecurityHistoryHandler,
-    UpdateProfileHandler,
-)
-from identity.application.profile.profile_query import ProfileQuery, SecurityHistoryQuery
-from identity.application.profile.update_profile import UpdateProfileCommand
+from identity.application.profile.read_profile.handler import ReadProfileHandler
+from identity.application.profile.read_profile.query import ProfileQuery
+from identity.application.profile.security_history.handler import SecurityHistoryHandler
+from identity.application.profile.security_history.query import SecurityHistoryQuery
+from identity.application.profile.update_profile.command import UpdateProfileCommand
+from identity.application.profile.update_profile.handler import UpdateProfileHandler
 from identity.application.sessions.list_sessions.handler import ListSessionsHandler
 from identity.application.sessions.list_sessions.query import ListSessionsQuery
 from identity.application.sessions.revoke_all_sessions.command import RevokeAllSessionsCommand

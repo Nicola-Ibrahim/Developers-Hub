@@ -88,7 +88,7 @@ def test_http_host_rechecks_trusted_access_and_rolls_back_denial(monkeypatch) ->
     host = DeveloperPlatformModule(Container(), Authorizer(False))
 
     with pytest.raises(CatalogForbidden):
-        asyncio.run(host.query(ReadResource(supplied, uuid4())))
+        asyncio.run(host.query(ReadResource(access=supplied, resource_id=uuid4())))
     assert events == ["membership", "rollback"]
 
 
@@ -147,7 +147,7 @@ def test_http_host_preserves_authenticated_actor_and_refreshes_project_role(monk
     authorizer = Authorizer(True)
     host = DeveloperPlatformModule(Container(), authorizer)
 
-    assert asyncio.run(host.query(ReadResource(supplied, uuid4()))) == trusted
+    assert asyncio.run(host.query(ReadResource(access=supplied, resource_id=uuid4()))) == trusted
     assert authorizer.requests[0].subject_id == trusted.user_id
     assert authorizer.requests[0].scopes == ("resources:read",)
     assert events == ["membership", "dispatch", "commit"]

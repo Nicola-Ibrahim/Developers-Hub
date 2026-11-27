@@ -4,18 +4,14 @@ from uuid import uuid4
 
 import pytest
 
-from identity.application.api_tokens.manage_personal_tokens import (
-    CreatePersonalTokenHandler,
-    PersonalTokenQueryHandler,
-    RevokePersonalTokenHandler,
-    RotatePersonalTokenHandler,
-)
-from identity.application.api_tokens.personal_token_messages import (
-    CreatePersonalTokenCommand,
-    ListPersonalTokensQuery,
-    RevokePersonalTokenCommand,
-    RotatePersonalTokenCommand,
-)
+from identity.application.api_tokens.create_personal_token.command import CreatePersonalTokenCommand
+from identity.application.api_tokens.create_personal_token.handler import CreatePersonalTokenHandler
+from identity.application.api_tokens.list_personal_tokens.handler import PersonalTokenQueryHandler
+from identity.application.api_tokens.list_personal_tokens.query import ListPersonalTokensQuery
+from identity.application.api_tokens.revoke_personal_token.command import RevokePersonalTokenCommand
+from identity.application.api_tokens.revoke_personal_token.handler import RevokePersonalTokenHandler
+from identity.application.api_tokens.rotate_personal_token.command import RotatePersonalTokenCommand
+from identity.application.api_tokens.rotate_personal_token.handler import RotatePersonalTokenHandler
 from identity.domain.errors import IdentityValidationError
 from identity.domain.records import ApiTokenStatus, PersonalApiToken
 
@@ -66,16 +62,33 @@ def test_create_and_list_personal_tokens_are_scoped_to_user_project_and_allowed_
     )
     reader = PersonalTokenQueryHandler(tokens)
     created, secret = asyncio.run(
-        creator.execute(CreatePersonalTokenCommand(owner, project_a, "build", ("catalog:read",), 2))
+        creator.execute(
+            CreatePersonalTokenCommand(
+                actor_id=owner,
+                project_id=project_a,
+                name="build",
+                scopes=("catalog:read",),
+                hours=2,
+            )
+        )
     )
     assert secret == "one-time-secret"
     assert created.scopes == ("catalog:read",)
-    assert asyncio.run(reader.execute(ListPersonalTokensQuery(owner, project_a))) == (created,)
-    assert asyncio.run(reader.execute(ListPersonalTokensQuery(owner, project_b))) == ()
-    assert asyncio.run(reader.execute(ListPersonalTokensQuery(owner))) == (created,)
+    assert asyncio.run(
+        reader.execute(ListPersonalTokensQuery(actor_id=owner, project_id=project_a))
+    ) == (created,)
+    assert (
+        asyncio.run(reader.execute(ListPersonalTokensQuery(actor_id=owner, project_id=project_b)))
+        == ()
+    )
+    assert asyncio.run(reader.execute(ListPersonalTokensQuery(actor_id=owner))) == (created,)
     with pytest.raises(IdentityValidationError):
         asyncio.run(
-            creator.execute(CreatePersonalTokenCommand(owner, project_a, "wide", ("admin:*",), 2))
+            creator.execute(
+                CreatePersonalTokenCommand(
+                    actor_id=owner, project_id=project_a, name="wide", scopes=("admin:*",), hours=2
+                )
+            )
         )
 
 
@@ -99,7 +112,12 @@ def test_rotation_locks_token_before_owner_check():
 
     tokens = Tokens()
     handler = RotatePersonalTokenHandler(tokens, Hasher(), Generator(), ("catalog:read",))
-    assert asyncio.run(handler.execute(RotatePersonalTokenCommand(uuid4(), token_id))) is None
+    assert (
+        asyncio.run(
+            handler.execute(RotatePersonalTokenCommand(actor_id=uuid4(), token_id=token_id))
+        )
+        is None
+    )
     assert tokens.locked
 
 
@@ -130,7 +148,9 @@ def test_rotation_keeps_expiry_and_scope_ceiling():
             return "replacement-secret"
 
     handler = RotatePersonalTokenHandler(Tokens(), Hasher(), Generator(), ("catalog:read",))
-    rotated, secret = asyncio.run(handler.execute(RotatePersonalTokenCommand(owner, old_id)))
+    rotated, secret = asyncio.run(
+        handler.execute(RotatePersonalTokenCommand(actor_id=owner, token_id=old_id))
+    )
     assert secret == "replacement-secret"
     assert rotated.token_id == new_id
     assert rotated.expires_at == old.expires_at
@@ -150,4 +170,6 @@ def test_revoke_handler_has_minimal_dependencies_and_revokes_owned_token():
             return True
 
     handler = RevokePersonalTokenHandler(Tokens())
-    assert asyncio.run(handler.execute(RevokePersonalTokenCommand(owner, token_id)))
+    assert asyncio.run(
+        handler.execute(RevokePersonalTokenCommand(actor_id=owner, token_id=token_id))
+    )
