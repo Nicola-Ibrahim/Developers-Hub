@@ -13,6 +13,7 @@ from api.core.security.request_identity import (
     request_identity,
 )
 from api.identity.authentication.credentials import BrowserCredentials, require_cookie_session
+from api.platform.projects.memberships import router as memberships_router
 from api.platform.projects.schemas import ProjectRegistrationView
 from devops_platform.application.interfaces.module import DeveloperPlatformModule
 from devops_platform.application.projects.get_project.query import (
@@ -78,3 +79,6 @@ async def projects(
     message = ReadProjects(user_id=user_id, accesses=accesses)
     rows = await module.query(message)
     return [ProjectRegistrationView.model_validate(asdict(row)) for row in rows]
+
+
+router.include_router(memberships_router)

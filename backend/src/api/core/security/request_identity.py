@@ -15,6 +15,8 @@ from api.identity.authentication.credentials import (
     require_valid_browser_session,
 )
 from api.settings.config import BrowserCookiePolicy
+from identity.application.authentication.authenticate_session.query import AuthenticateSessionQuery
+from identity.application.interfaces.dispatch import IdentityModule
 from identity.application.interfaces.session_tokens import SessionTokenVerifier
 from shared.authorization.credentials import RequestCredentials
 
@@ -57,3 +59,17 @@ async def browser_request_identity(
         require_browser_origin(request, cookie_policy.allowed_origins)
     request_credentials.identity = credentials
     return credentials
+
+
+@inject
+async def authenticated_identity(
+    request: Request,
+    module: FromDishka[IdentityModule],
+    credentials: Annotated[BrowserCredentials, Depends(browser_request_identity)],
+) -> None:
+    principal = await module.query(
+        AuthenticateSessionQuery(
+            session_token=require_cookie_session(credentials), project_id=credentials.project_id
+        )
+    )
+    request.state.identity_principal = principal

@@ -25,11 +25,11 @@ from identity.application.sessions.select_active_project.command import (
     SelectActiveProjectCommand,
 )
 
-public_router = APIRouter()
+standalone_router = APIRouter()
 router = APIRouter()
 
 
-@public_router.post("/auth/login", tags=["identity"])
+@standalone_router.post("/auth/login", tags=["identity"])
 @inject
 async def login(
     body: LoginBody,
